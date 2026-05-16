@@ -1,0 +1,48 @@
+{
+  "name": "walrus-agent-stack-mcp",
+  "version": "0.1.0",
+  "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
+  "type": "module",
+  "bin": {
+    "walrus-agent-stack-mcp": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:int": "vitest run tests/integration",
+    "test:e2e": "bash tests/e2e/d2-demo.sh",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write .",
+    "smoke": "node dist/cli.js --health"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "walrus",
+    "sui",
+    "agent",
+    "memory",
+    "seal"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@mysten/sui": "^2.16.3",
+    "@mysten/sui-stack-messaging": "^0.0.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
+    "@typescript-eslint/parser": "^8.59.3",
+    "eslint": "^10.4.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.22.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}
