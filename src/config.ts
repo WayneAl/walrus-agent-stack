@@ -1,5 +1,3 @@
-/// <reference types="node" />
-import process from 'node:process';
 import { z } from 'zod';
 
 export const ConfigSchema = z.object({
@@ -13,7 +11,7 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-export type ConfigEnv = Record<string, string | undefined>;
+export type ConfigEnv = NodeJS.ProcessEnv;
 
 const DEFAULT_RELAYER_TESTNET = 'https://relayer.testnet.example.com';
 const DEFAULT_RELAYER_MAINNET = 'https://relayer.mainnet.example.com';

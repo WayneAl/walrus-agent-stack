@@ -1,16 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * sui-stack-messaging SDK integration spike.
+ * sui-stack-messaging SDK integration spike (gRPC).
  *
  * Goals:
- *  1. Prove the real `createSuiStackMessagingClient` factory wires up against testnet.
- *  2. Exercise a read-only RPC path (no relayer needed) to confirm RPC + auto package config.
- *  3. Attempt a relayer-dependent op and degrade gracefully if no relayer is running.
- *
- * The spike does NOT consume `src/config.ts` directly because Task 2's Config requires
- * a valid `relayerUrl` and we want the spike to run even when none is set. This is the
- * cleanest place to inline testnet defaults for now — see docs/sdk-notes.md for the
- * follow-up plan.
+ *  1. Prove the real `createSuiStackMessagingClient` factory wires up against testnet via gRPC.
+ *  2. Gas-free probes first: getReferenceGasPrice (RPC reachability) + generateGroupDEK
+ *     (Seal threshold encryption — proves Seal works without any on-chain write).
+ *  3. Optional: createAndShareGroup as a relayer/gas-dependent probe; degrade gracefully if
+ *     either is unavailable.
  *
  * Run:
  *   pnpm tsx scripts/spike-sdk.ts
@@ -19,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { getJsonRpcFullnodeUrl, SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+import { SuiGrpcClient } from '@mysten/sui/grpc';
 import {
   createSuiStackMessagingClient,
   TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG,
@@ -62,23 +59,30 @@ const SEAL_TESTNET_DEFAULTS = [
 
 const WALRUS_PUBLISHER_DEFAULT = 'https://publisher.walrus-testnet.walrus.space';
 const WALRUS_AGGREGATOR_DEFAULT = 'https://aggregator.walrus-testnet.walrus.space';
+// Sui fullnodes serve both JSON-RPC and gRPC-Web on the same endpoint. Source:
+// /Users/waynekuo/Documents/GitHub/sui-stack-messaging/docs/sui-stack-messaging/Setup.md
+const SUI_GRPC_TESTNET_DEFAULT = 'https://fullnode.testnet.sui.io:443';
 
 interface SpikeConfig {
   privateKey: string;
-  rpcUrl: string;
   relayerUrl: string;
   sealServers: string[];
   walrusPublisher: string;
   walrusAggregator: string;
+  grpcBaseUrl: string;
 }
 
 function buildConfig(): SpikeConfig {
-  const fileEnv = loadEnvFile(resolve(process.cwd(), '.env.testnet'));
-  const env: Record<string, string | undefined> = { ...fileEnv, ...process.env };
+  // `.env.testnet` overrides `.env` so users who maintain both files get the testnet variant
+  // for spike runs. Either is fine.
+  const cwd = process.cwd();
+  const envBase = loadEnvFile(resolve(cwd, '.env'));
+  const envTestnet = loadEnvFile(resolve(cwd, '.env.testnet'));
+  const env: Record<string, string | undefined> = { ...envBase, ...envTestnet, ...process.env };
 
   if (!env.SUI_PRIVATE_KEY) {
     throw new Error(
-      'SUI_PRIVATE_KEY not set. Create .env.testnet (see .env.testnet.example) or export it.\n' +
+      'SUI_PRIVATE_KEY not set. Put it in .env or .env.testnet (see .env.testnet.example), or export it.\n' +
         'Generate a fresh keypair with: pnpm tsx scripts/gen-testnet-wallet.ts',
     );
   }
@@ -86,15 +90,15 @@ function buildConfig(): SpikeConfig {
   const sealServers = (env.SEAL_SERVERS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   return {
     privateKey: env.SUI_PRIVATE_KEY,
-    rpcUrl: (env.SUI_RPC_URLS ?? getJsonRpcFullnodeUrl('testnet')).split(',')[0]!.trim(),
     relayerUrl: env.RELAYER_URL ?? 'http://localhost:3000',
     sealServers: sealServers.length ? sealServers : SEAL_TESTNET_DEFAULTS,
     walrusPublisher: env.WALRUS_PUBLISHER_URL ?? WALRUS_PUBLISHER_DEFAULT,
     walrusAggregator: env.WALRUS_AGGREGATOR_URL ?? WALRUS_AGGREGATOR_DEFAULT,
+    grpcBaseUrl: env.SUI_GRPC_BASE_URL ?? SUI_GRPC_TESTNET_DEFAULT,
   };
 }
 
-// ---------- relayer error detection ----------
+// ---------- error classification ----------
 function isRelayerUnreachable(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const stack = `${err.message}\n${err.stack ?? ''}`.toLowerCase();
@@ -108,15 +112,29 @@ function isRelayerUnreachable(err: unknown): boolean {
   );
 }
 
+function isInsufficientGas(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes('insufficientgas') ||
+    msg.includes('insufficient sui balance') ||
+    msg.includes('gas selection') ||
+    msg.includes('no gas coin') ||
+    msg.includes('no valid gas coins') ||
+    msg.includes('balance is zero') ||
+    msg.includes('gas budget')
+  );
+}
+
 // ---------- main ----------
 async function main(): Promise<void> {
-  console.log('--- sui-stack-messaging SDK spike ---');
+  console.log('--- sui-stack-messaging SDK spike (gRPC) ---');
   const cfg = buildConfig();
   const address = deriveAddress(cfg.privateKey);
   const keypair = loadKeypair(cfg.privateKey);
 
   console.log(`Sui address           : ${address}`);
-  console.log(`RPC URL               : ${cfg.rpcUrl}`);
+  console.log(`gRPC baseUrl          : ${cfg.grpcBaseUrl}`);
   console.log(`Relayer URL           : ${cfg.relayerUrl}`);
   console.log(`Seal servers (count)  : ${cfg.sealServers.length}`);
   console.log(`Walrus publisher      : ${cfg.walrusPublisher}`);
@@ -125,17 +143,16 @@ async function main(): Promise<void> {
     `Testnet pkg (orig/lat): ${TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG.originalPackageId} / ` +
       `${TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG.latestPackageId}`,
   );
-  console.log(
-    `Testnet namespace     : ${TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG.namespaceId}`,
-  );
 
-  // --- read-only RPC probe (no relayer needed) ---
-  const suiClient = new SuiJsonRpcClient({ url: cfg.rpcUrl, network: 'testnet' });
+  // --- gRPC client construction ---
+  const suiClient = new SuiGrpcClient({ network: 'testnet', baseUrl: cfg.grpcBaseUrl });
+
+  // --- gas-free RPC probe: getReferenceGasPrice ---
   try {
-    const version = await suiClient.getRpcApiVersion();
-    console.log(`Sui RPC API version   : ${version ?? '<unknown>'}`);
+    const gasPrice = await suiClient.getReferenceGasPrice();
+    console.log(`Reference gas price   : ${gasPrice.referenceGasPrice} mist`);
   } catch (err) {
-    console.error('Sui RPC probe FAILED — check connectivity / RPC URL.');
+    console.error('gRPC probe FAILED — check connectivity / gRPC endpoint.');
     console.error(err);
     process.exit(1);
   }
@@ -165,8 +182,23 @@ async function main(): Promise<void> {
   console.log(`groups client OK      : ${messagingClient.groups.constructor.name}`);
   console.log(`seal client OK        : ${messagingClient.seal.constructor.name}`);
 
-  // --- relayer-dependent probe: createAndShareGroup ---
-  console.log('\n--- relayer-dependent probe: createAndShareGroup ---');
+  // --- gas-free Seal probe: generateGroupDEK ---
+  // This exercises the full Seal threshold encryption path (talks to Seal key servers via
+  // network) but does NOT write anything on-chain, so no gas is required. If this works,
+  // we know the Seal serverConfigs + session key + crypto path is wired correctly even
+  // when the wallet is unfunded.
+  console.log('\n--- gas-free Seal probe: generateGroupDEK ---');
+  try {
+    const { uuid, encryptedDek } = await messagingClient.messaging.encryption.generateGroupDEK();
+    console.log(`Seal-encrypted DEK OK — uuid=${uuid} encryptedDek=${encryptedDek.byteLength} bytes`);
+  } catch (err) {
+    console.error('generateGroupDEK FAILED — Seal path is broken.');
+    console.error(err);
+    process.exit(1);
+  }
+
+  // --- relayer/gas-dependent probe: createAndShareGroup ---
+  console.log('\n--- relayer+gas probe: createAndShareGroup ---');
   try {
     const result = await messagingClient.messaging.createAndShareGroup({
       signer: keypair,
@@ -182,28 +214,15 @@ async function main(): Promise<void> {
         'Reference relayer: /Users/waynekuo/Documents/GitHub/sui-stack-messaging/relayer/README.md',
       );
       console.log(`(underlying error: ${(err as Error).message})`);
-      // Note: createAndShareGroup is mostly on-chain; a relayer is required for sendMessage.
-      // Still, this branch handles any HTTP transport setup error so the spike never
-      // surfaces a stack trace for the expected "no relayer" case.
       process.exit(0);
     }
-    if (err instanceof Error) {
-      const msg = err.message.toLowerCase();
-      // Insufficient gas / no coins is also expected on a fresh, unfunded wallet.
-      if (
-        msg.includes('insufficientgas') ||
-        msg.includes('no gas coin') ||
-        msg.includes('no valid gas coins') ||
-        msg.includes('balance is zero') ||
-        msg.includes('gas budget')
-      ) {
-        console.log(
-          'WALLET NOT FUNDED — request testnet SUI via: pnpm tsx scripts/gen-testnet-wallet.ts ' +
-            "(or call the faucet for the existing address). The SDK plumbing is correct; we just can't pay gas.",
-        );
-        console.log(`(underlying error: ${err.message})`);
-        process.exit(0);
-      }
+    if (isInsufficientGas(err)) {
+      console.log(
+        'WALLET NOT FUNDED — request testnet SUI via: pnpm tsx scripts/gen-testnet-wallet.ts ' +
+          "(or call the faucet for the existing address). SDK plumbing is correct; we just can't pay gas.",
+      );
+      console.log(`(underlying error: ${(err as Error).message})`);
+      process.exit(0);
     }
     console.error('createAndShareGroup FAILED with unexpected error:');
     console.error(err);

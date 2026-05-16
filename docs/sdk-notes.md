@@ -15,20 +15,22 @@ as the source of truth when wiring up the SDK elsewhere in the codebase.
 | Seal `serverConfigs` shape unspecified | `serverConfigs: Array<{ objectId: string, weight: number }>` (weights are per-server quorum weights). |
 | `packageConfig` must be supplied | **Auto-detected** for testnet/mainnet. Only required for localnet/devnet. |
 | `@mysten/seal` not needed | Not a direct dep, but `@mysten/seal` and `@mysten/sui-groups` are **peer dependencies** — they must be installed for the factory to run. Both are now in `package.json`. |
-| `SuiClient` from `@mysten/sui/client` works | The factory's example and what works in Node is `SuiJsonRpcClient` from `@mysten/sui/jsonRpc` — its `network` property is what the factory reads to auto-detect package config. |
+| `SuiClient` from `@mysten/sui/client` works | Use **`SuiGrpcClient` from `@mysten/sui/grpc`** (JSON-RPC client is being deprecated). The factory accepts any `ClientWithCoreApi`; gRPC is the supported path forward. Constructor requires both `network` and `baseUrl`: Sui fullnodes serve gRPC-Web on the same `https://fullnode.<network>.sui.io:443` endpoint as JSON-RPC. |
 
 ## Factory signature (real)
 
 ```ts
-import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
+import { SuiGrpcClient } from '@mysten/sui/grpc';
 import {
   createSuiStackMessagingClient,
   WalrusHttpStorageAdapter,
 } from '@mysten/sui-stack-messaging';
 
-const sui = new SuiJsonRpcClient({
-  url: getJsonRpcFullnodeUrl('testnet'),
+// gRPC: both `network` (for SDK auto-detection) and `baseUrl` (for the gRPC-Web
+// transport) are required. Sui fullnodes serve both protocols on the same port.
+const sui = new SuiGrpcClient({
   network: 'testnet',
+  baseUrl: 'https://fullnode.testnet.sui.io:443',
 });
 
 const client = createSuiStackMessagingClient(sui, {
@@ -136,7 +138,7 @@ the Mysten reference deployment.
 
 | Field | Value |
 | --- | --- |
-| RPC URL | `https://fullnode.testnet.sui.io:443` (via `getJsonRpcFullnodeUrl('testnet')`) |
+| gRPC baseUrl | `https://fullnode.testnet.sui.io:443` (same endpoint serves JSON-RPC + gRPC-Web) |
 | Messaging package (orig=latest @ v0.0.2) | `0x047696be0e98f1b47a99727fecf2955cadb23c56f67c6b872b74e3ad59d51b46` |
 | Messaging namespace | `0x9442bdc5c0aef62b2c9ac797db3f74db9c99400547992d8fb49cc7b0ef709cf2` |
 | Seal key server #1 | `0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75` |
@@ -145,12 +147,22 @@ the Mysten reference deployment.
 | Walrus aggregator | `https://aggregator.walrus-testnet.walrus.space` |
 | Faucet (v2) | `POST https://faucet.testnet.sui.io/v2/gas`, body `{"FixedAmountRequest":{"recipient":"0x..."}}` |
 
+## Verified working without gas
+
+The spike runs a **gas-free Seal probe** (`messagingClient.messaging.encryption.generateGroupDEK()`)
+that exercises the full Seal threshold encryption path — talks to both Seal key
+servers, generates a DEK, Seal-encrypts it — and returns a ~388-byte encrypted
+DEK. This succeeds even when the wallet has zero SUI. **Confirms: Seal on
+testnet does not require gas.** Only on-chain operations
+(`createAndShareGroup`, `rotateEncryptionKey`, etc.) need a funded wallet.
+
 ## Prerequisites for a full end-to-end spike run
 
 The spike (`pnpm tsx scripts/spike-sdk.ts`) needs three things to pass beyond the
-RPC + SDK init stage:
+RPC + SDK init + Seal stages:
 
-1. **`.env.testnet` with `SUI_PRIVATE_KEY`.** Generate with
+1. **`.env` or `.env.testnet` with `SUI_PRIVATE_KEY`.** The spike loader reads
+   `.env` first then `.env.testnet` (testnet overrides). Generate with
    `pnpm tsx scripts/gen-testnet-wallet.ts` (prints the key + hits the faucet);
    copy the `SUI_PRIVATE_KEY=...` line into `.env.testnet` (gitignored). Real keys
    are never written to disk by the generator — the user owns the secret material.
