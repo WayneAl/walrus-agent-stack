@@ -116,10 +116,35 @@ options bag with `signer: Signer` and a `groupRef: GroupRef` (`{ groupId, encryp
 
 ### Supporting extensions
 
-- `client.groups` — `SuiGroupsClient` for fine-grained permissioned group ops (e.g.
-  `client.groups.grantPermission({...})`).
+- `client.groups` — `SuiGroupsClient` for fine-grained permissioned group ops. **Heads-up: `addMembers` lives here, NOT on `client.messaging`.** Signature: `addMembers({ signer, groupId, members: MemberWithPermissions[] })` where each member is `{ address, permissions: string[] }` and permissions are explicit Move type strings (use `defaultMemberPermissionTypes(originalPackageId)` from `@mysten/sui-stack-messaging` to get Sender/Reader/Editor/Deleter for the messaging extension). Membership reads: `client.groups.view.getMembers({ groupId, exhaustive: true })` → `{ members, hasNextPage, cursor }`. Filter out system addresses via `client.messaging.derive.systemObjectAddresses()` (GroupLeaver, GroupManager).
 - `client.seal` — raw `SealClient` for encrypt/decrypt if you need lower-level access.
 - `client.core` — base Sui RPC (`getRpcApiVersion`, `getCoins`, etc.).
+
+### Method signature outliers (T7 discoveries)
+
+| Method | Quirk |
+| --- | --- |
+| `client.messaging.leave({ signer, groupId, transaction? })` | Takes raw `groupId: string`, NOT a `GroupRef`. Derive with `client.messaging.derive.groupId({ uuid })` if you only have the uuid. |
+| `client.messaging.removeMembersAndRotateKey({ signer, ...GroupRef, members: string[] })` | Plural — accepts an array even for single-member removes. Plan called it `removeMemberAndRotateKey` (singular). |
+| `client.groups.addMembers` | See above — lives on the groups extension. |
+| `createAndShareGroup` return | `{ digest, effects }`. The plan's `result.uuid` / `result.objectId` are wrong. Pass your own `uuid` (e.g. `crypto.randomUUID()`) and derive groupId from it for your return shape. |
+
+### Package config accessor
+
+`sdk.client.messaging` does not expose `packageConfig` publicly. To get the original package ID (e.g. for permission type strings), select between the exported constants by network:
+
+```ts
+import {
+  TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG,
+  MAINNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG,
+  defaultMemberPermissionTypes,
+} from '@mysten/sui-stack-messaging';
+
+const pkg = sdk.config.network === 'mainnet'
+  ? MAINNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG
+  : TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG;
+const memberPerms = defaultMemberPermissionTypes(pkg.originalPackageId);
+```
 
 ### Lower-level helpers exposed on `client.messaging`
 
