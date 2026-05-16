@@ -2,10 +2,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { sendTool, historyTool } from '../../src/tools/channel-messaging.js';
 import type { SdkContext } from '../../src/sdk-client.js';
+import type { Outbox } from '../../src/outbox.js';
 
 interface MockMessaging {
   sendMessage: ReturnType<typeof vi.fn>;
   getMessages: ReturnType<typeof vi.fn>;
+}
+
+interface MockOutbox {
+  enqueue: ReturnType<typeof vi.fn>;
+  pending: ReturnType<typeof vi.fn>;
+  markDone: ReturnType<typeof vi.fn>;
+  incrementAttempt: ReturnType<typeof vi.fn>;
+}
+
+function makeOutboxStub(): MockOutbox {
+  return {
+    enqueue: vi.fn(),
+    pending: vi.fn(() => []),
+    markDone: vi.fn(),
+    incrementAttempt: vi.fn(),
+  };
 }
 
 function makeMockSdk(getMessagesResult?: unknown): {
@@ -30,7 +47,8 @@ function makeMockSdk(getMessagesResult?: unknown): {
 describe('channel messaging tools', () => {
   it('both tools expose correct names and non-empty descriptions', () => {
     const { sdk } = makeMockSdk();
-    const tools = [sendTool(sdk), historyTool(sdk)];
+    const outbox = makeOutboxStub() as unknown as Outbox;
+    const tools = [sendTool(sdk, outbox), historyTool(sdk)];
     expect(tools.map((t) => t.name)).toEqual(['channel.send', 'channel.history']);
     for (const t of tools) {
       expect(t.description).toBeTruthy();
@@ -39,12 +57,14 @@ describe('channel messaging tools', () => {
 
   describe('channel.send', () => {
     let env: ReturnType<typeof makeMockSdk>;
+    let outboxStub: MockOutbox;
     beforeEach(() => {
       env = makeMockSdk();
+      outboxStub = makeOutboxStub();
     });
 
     it('forwards a serialized envelope to sendMessage with the channel uuid', async () => {
-      const tool = sendTool(env.sdk);
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
       const res = (await tool.handler({
         channel_id: 'uuid-send-1',
         content: 'hello world',
@@ -83,7 +103,7 @@ describe('channel messaging tools', () => {
     });
 
     it('defaults optional fields when omitted', async () => {
-      const tool = sendTool(env.sdk);
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
       await tool.handler({
         channel_id: 'uuid-send-2',
         content: 'no extras',
@@ -97,6 +117,28 @@ describe('channel messaging tools', () => {
         parent_message_id: null,
         refs: [],
       });
+    });
+
+    it('queues to outbox and throws RELAYER_UNREACHABLE when sendMessage hits an infra error', async () => {
+      env.messaging.sendMessage.mockImplementationOnce(async () => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:3000');
+      });
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      const args = {
+        channel_id: 'uuid-send-3',
+        content: 'queue me',
+        refs: ['walrus://blob/x'],
+        agent_id: 'agent-q',
+        parent_message_id: 'parent-q',
+      };
+      await expect(tool.handler(args)).rejects.toMatchObject({
+        code: 'RELAYER_UNREACHABLE',
+      });
+      expect(outboxStub.enqueue).toHaveBeenCalledTimes(1);
+      const enqueued = outboxStub.enqueue.mock.calls[0]![0];
+      expect(enqueued.tool).toBe('channel.send');
+      expect(enqueued.args).toEqual(args);
+      expect(typeof enqueued.id).toBe('string');
     });
   });
 

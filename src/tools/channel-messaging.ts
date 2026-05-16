@@ -3,6 +3,28 @@ import type { DecryptedMessage } from '@mysten/sui-stack-messaging';
 import type { ToolDef } from '../mcp/dispatch.js';
 import { ChannelSendArgs, ChannelHistoryArgs } from '../schemas.js';
 import type { SdkContext } from '../sdk-client.js';
+import type { Outbox } from '../outbox.js';
+
+/**
+ * Recognize transient network/relayer failures that we should queue for retry
+ * via the outbox. Mirrors the predicate used in `scripts/spike-sdk.ts`'s
+ * `isRelayerUnreachable` — these are the substrings Node + fetch surface when
+ * the relayer / RPC endpoint is unreachable. We deliberately do NOT match
+ * generic "5" digit sequences (the plan's draft predicate did, which would
+ * misclassify any error containing a 5 — e.g. a payload size of `length=5`).
+ */
+function isInfraError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const stack = `${e.message}\n${e.stack ?? ''}`.toLowerCase();
+  return (
+    stack.includes('econnrefused') ||
+    stack.includes('fetch failed') ||
+    stack.includes('enotfound') ||
+    stack.includes('etimedout') ||
+    stack.includes('network is unreachable') ||
+    stack.includes('socket hang up')
+  );
+}
 
 /**
  * Envelope written into the encrypted `text` field of every message we send.
@@ -48,12 +70,16 @@ function tryParseEnvelope(s: string): MessageEnvelope | { type: 'text'; text: st
   }
 }
 
-export function sendTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelSendArgs>> {
+export function sendTool(
+  sdk: SdkContext,
+  outbox: Outbox,
+): ToolDef<z.infer<typeof ChannelSendArgs>> {
   return {
     name: 'channel.send',
     description: 'Send a message to a channel; refs are Walrus URIs',
     schema: ChannelSendArgs,
-    handler: async ({ channel_id, content, refs, agent_id, parent_message_id }) => {
+    handler: async (args) => {
+      const { channel_id, content, refs, agent_id, parent_message_id } = args;
       const body: MessageEnvelope = {
         type: 'text',
         text: content,
@@ -61,17 +87,31 @@ export function sendTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelSendArg
         parent_message_id: parent_message_id ?? null,
         refs: refs ?? [],
       };
-      const result = await sdk.client.messaging.sendMessage({
-        signer: sdk.keypair,
-        groupRef: { uuid: channel_id },
-        text: JSON.stringify(body),
-      });
-      return {
-        message_id: result.messageId,
-        channel_id,
-        sender: sdk.keypair.toSuiAddress(),
-        timestamp_ms: Date.now(),
-      };
+      try {
+        const result = await sdk.client.messaging.sendMessage({
+          signer: sdk.keypair,
+          groupRef: { uuid: channel_id },
+          text: JSON.stringify(body),
+        });
+        return {
+          message_id: result.messageId,
+          channel_id,
+          sender: sdk.keypair.toSuiAddress(),
+          timestamp_ms: Date.now(),
+        };
+      } catch (e: unknown) {
+        if (isInfraError(e)) {
+          const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          // Queue the full validated args so resend can replay them verbatim.
+          outbox.enqueue({ id, tool: 'channel.send', args });
+          throw {
+            code: 'RELAYER_UNREACHABLE',
+            message: 'Queued to outbox',
+            details: { outbox_id: id },
+          };
+        }
+        throw e;
+      }
     },
   };
 }

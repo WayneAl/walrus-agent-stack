@@ -53,6 +53,7 @@ export const MemorySnapshotArgs = z.object({
 
 export const IdentityVerifyArgs = z.object({
   message_id: UUID,
+  channel_id: UUID,
 });
 
 export const SystemDebugArgs = z.object({

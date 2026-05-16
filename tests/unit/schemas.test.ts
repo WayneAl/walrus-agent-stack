@@ -26,9 +26,10 @@ describe('schemas', () => {
     expect(MemoryWriteArgs.safeParse({ channel_id: 'c', key: 'k' }).success).toBe(false);
   });
 
-  it('IdentityVerifyArgs requires message_id', () => {
-    expect(IdentityVerifyArgs.safeParse({ message_id: 'm' }).success).toBe(true);
+  it('IdentityVerifyArgs requires message_id and channel_id', () => {
     expect(IdentityVerifyArgs.safeParse({}).success).toBe(false);
+    expect(IdentityVerifyArgs.safeParse({ message_id: 'm' }).success).toBe(false);
+    expect(IdentityVerifyArgs.safeParse({ message_id: 'm', channel_id: 'c' }).success).toBe(true);
   });
 
   it('WalrusUriSchema validates walrus:// URIs', () => {

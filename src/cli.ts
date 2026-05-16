@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import { startServer } from './mcp/server.js';
 import { Dispatcher } from './mcp/dispatch.js';
 import { loadConfig } from './config.js';
@@ -14,8 +15,9 @@ import {
 import { sendTool, historyTool } from './tools/channel-messaging.js';
 import { joinTool } from './tools/channel-subscribe.js';
 import { writeTool as memoryWriteTool, readTool as memoryReadTool } from './tools/memory.js';
-import { debugTool } from './tools/system.js';
+import { debugTool, resendTool } from './tools/system.js';
 import { ToolLog } from './logging.js';
+import { Outbox } from './outbox.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -35,6 +37,10 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const toolLog = new ToolLog(config.logDir);
+  // Outbox lives next to (not inside) the log dir so JSONL log scrapes don't
+  // accidentally pick it up. `dirname(logDir)/outbox` cleanly sits alongside
+  // the per-day log files.
+  const outbox = new Outbox(path.join(path.dirname(config.logDir), 'outbox'));
   const dispatcher = new Dispatcher(toolLog);
   const sdk = getSdk(config);
   dispatcher.register(whoamiTool(sdk));
@@ -44,12 +50,13 @@ async function main(): Promise<void> {
   dispatcher.register(inviteTool(sdk));
   dispatcher.register(kickTool(sdk));
   dispatcher.register(leaveTool(sdk));
-  dispatcher.register(sendTool(sdk));
+  dispatcher.register(sendTool(sdk, outbox));
   dispatcher.register(historyTool(sdk));
   dispatcher.register(joinTool(sdk));
   dispatcher.register(memoryWriteTool(sdk));
   dispatcher.register(memoryReadTool(sdk));
   dispatcher.register(debugTool(toolLog));
+  dispatcher.register(resendTool(outbox, dispatcher));
   await startServer(dispatcher);
 }
 
