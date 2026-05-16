@@ -4,7 +4,8 @@
   "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
   "type": "module",
   "bin": {
-    "walrus-agent-stack-mcp": "./dist/cli.js"
+    "walrus-agent-stack-mcp": "./dist/cli.js",
+    "walrus-agent-stack": "./bin/init.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
