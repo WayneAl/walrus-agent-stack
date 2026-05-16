@@ -2,6 +2,8 @@
 import { startServer } from './mcp/server.js';
 import { Dispatcher } from './mcp/dispatch.js';
 import { loadConfig } from './config.js';
+import { getSdk } from './sdk-client.js';
+import { whoamiTool, verifyTool } from './tools/identity.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -20,7 +22,10 @@ async function main(): Promise<void> {
   }
 
   const dispatcher = new Dispatcher();
-  // tools will be registered in subsequent tasks
+  const config = loadConfig();
+  const sdk = getSdk(config);
+  dispatcher.register(whoamiTool(sdk));
+  dispatcher.register(verifyTool(sdk));
   await startServer(dispatcher);
 }
 
