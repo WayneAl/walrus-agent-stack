@@ -4,8 +4,15 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import type { Config } from './config.js';
 import { loadKeypair } from './wallet.js';
 
+// Lock TApproveContext to void via instantiation expression. Without this,
+// `ReturnType<typeof createSuiStackMessagingClient>` infers TApproveContext as
+// `unknown`, which forces every messaging call site to deal with a required
+// `sealApproveContext: unknown` field. We don't configure a custom SealPolicy,
+// so the default `void` branch is the correct shape for the whole codebase.
+export type SuiStackMessagingClient = ReturnType<typeof createSuiStackMessagingClient<void>>;
+
 export interface SdkContext {
-  client: ReturnType<typeof createSuiStackMessagingClient>;
+  client: SuiStackMessagingClient;
   keypair: Ed25519Keypair;
   config: Config;
 }

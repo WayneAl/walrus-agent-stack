@@ -1,32 +1,8 @@
 import { z } from 'zod';
-import type {
-  DecryptedMessage,
-  GetMessagesOptions,
-  GetMessagesResult,
-  SendMessageOptions,
-} from '@mysten/sui-stack-messaging';
+import type { DecryptedMessage } from '@mysten/sui-stack-messaging';
 import type { ToolDef } from '../mcp/dispatch.js';
 import { ChannelSendArgs, ChannelHistoryArgs } from '../schemas.js';
 import type { SdkContext } from '../sdk-client.js';
-
-/**
- * The SDK's messaging methods are generic over a `TApproveContext` parameter
- * (`void` by default). The default is preserved on the class itself, but it
- * is lost when we type `SdkContext.client` via `ReturnType<typeof
- * createSuiStackMessagingClient>` — TypeScript widens unbound generics to
- * `unknown`, which makes `WithApproveContext<T, unknown>` add a required
- * `sealApproveContext` field. Our config doesn't supply a custom seal policy,
- * so the `void` branch is the correct shape. We project the messaging surface
- * we use onto a narrow interface that locks `TApproveContext = void`.
- */
-interface NarrowMessaging {
-  sendMessage(options: SendMessageOptions<void>): Promise<{ messageId: string }>;
-  getMessages(options: GetMessagesOptions<void>): Promise<GetMessagesResult>;
-}
-
-function messaging(sdk: SdkContext): NarrowMessaging {
-  return sdk.client.messaging as unknown as NarrowMessaging;
-}
 
 /**
  * Envelope written into the encrypted `text` field of every message we send.
@@ -85,7 +61,7 @@ export function sendTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelSendArg
         parent_message_id: parent_message_id ?? null,
         refs: refs ?? [],
       };
-      const result = await messaging(sdk).sendMessage({
+      const result = await sdk.client.messaging.sendMessage({
         signer: sdk.keypair,
         groupRef: { uuid: channel_id },
         text: JSON.stringify(body),
@@ -111,7 +87,7 @@ export function historyTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelHist
       // both denote "messages strictly after this point," so we map directly.
       // If we later need a wall-clock "since" we'll add a separate field and
       // do client-side filtering, but per-group order is the supported cursor.
-      const { messages, hasNext } = await messaging(sdk).getMessages({
+      const { messages, hasNext } = await sdk.client.messaging.getMessages({
         signer: sdk.keypair,
         groupRef: { uuid: channel_id },
         limit,
