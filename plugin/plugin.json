@@ -1,0 +1,7 @@
+{
+  "name": "walrus-agent-stack",
+  "version": "0.1.0",
+  "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
+  "author": "Wayne Kuo",
+  "homepage": "https://github.com/WayneAl/walrus-agent-stack"
+}
