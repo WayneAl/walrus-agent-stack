@@ -1,0 +1,8 @@
+{
+  "name": "walrus-agent-stack",
+  "displayName": "Walrus Agent Stack",
+  "summary": "Walrus-backed shared memory + encrypted channels for any MCP agent",
+  "logo": "logo.svg",
+  "tags": ["mcp", "walrus", "sui", "agent", "memory", "encryption", "verifiable"],
+  "categories": ["agents", "infrastructure"]
+}

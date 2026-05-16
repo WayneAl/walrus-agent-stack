@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Walrus Agent Stack">
+  <title>Walrus Agent Stack</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A2540"/>
+      <stop offset="1" stop-color="#1E6EE6"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <g fill="none" stroke="#7FD3FF" stroke-width="3" stroke-linecap="round">
+    <line x1="72" y1="72" x2="128" y2="128"/>
+    <line x1="184" y1="72" x2="128" y2="128"/>
+    <line x1="72" y1="184" x2="128" y2="128"/>
+    <line x1="184" y1="184" x2="128" y2="128"/>
+    <line x1="72" y1="72" x2="184" y2="72"/>
+    <line x1="72" y1="184" x2="184" y2="184"/>
+  </g>
+  <g fill="#7FD3FF">
+    <circle cx="72" cy="72" r="12"/>
+    <circle cx="184" cy="72" r="12"/>
+    <circle cx="72" cy="184" r="12"/>
+    <circle cx="184" cy="184" r="12"/>
+  </g>
+  <circle cx="128" cy="128" r="22" fill="#FFFFFF"/>
+  <circle cx="128" cy="128" r="10" fill="#1E6EE6"/>
+</svg>
