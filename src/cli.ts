@@ -15,7 +15,7 @@ import {
 import { sendTool, historyTool } from './tools/channel-messaging.js';
 import { joinTool } from './tools/channel-subscribe.js';
 import { writeTool as memoryWriteTool, readTool as memoryReadTool } from './tools/memory.js';
-import { debugTool, resendTool } from './tools/system.js';
+import { debugTool, resendTool, healthTool } from './tools/system.js';
 import { ToolLog } from './logging.js';
 import { Outbox } from './outbox.js';
 
@@ -57,6 +57,7 @@ async function main(): Promise<void> {
   dispatcher.register(memoryReadTool(sdk));
   dispatcher.register(debugTool(toolLog));
   dispatcher.register(resendTool(outbox, dispatcher));
+  dispatcher.register(healthTool(sdk));
   await startServer(dispatcher);
 }
 

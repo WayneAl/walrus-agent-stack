@@ -1,11 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { ToolLog, type LogEntry } from '../../src/logging.js';
-import { debugTool, resendTool } from '../../src/tools/system.js';
+import { debugTool, resendTool, healthTool } from '../../src/tools/system.js';
 import { Outbox } from '../../src/outbox.js';
 import type { Dispatcher } from '../../src/mcp/dispatch.js';
+import type { SdkContext } from '../../src/sdk-client.js';
 
 describe('system.debug tool', () => {
   it('has correct name and non-empty description', () => {
@@ -81,5 +83,97 @@ describe('system.resend tool', () => {
     const tool = resendTool(outbox, dispatcher);
     expect(tool.name).toBe('system.resend');
     expect(tool.description).toBeTruthy();
+  });
+});
+
+interface HealthResult {
+  status: 'ok' | 'degraded';
+  address: string;
+  checks: Record<string, { ok: boolean; detail?: string }>;
+}
+
+function buildSdkStub(getBalance: (opts: { owner: string }) => Promise<unknown>): {
+  sdk: SdkContext;
+  keypair: Ed25519Keypair;
+} {
+  const keypair = Ed25519Keypair.generate();
+  const sdk = {
+    keypair,
+    config: {
+      relayerUrl: 'https://relayer.test.example.com',
+    },
+    client: {
+      core: { getBalance },
+    },
+  } as unknown as SdkContext;
+  return { sdk, keypair };
+}
+
+function fakeResponse(ok: boolean, status: number): Response {
+  return { ok, status } as unknown as Response;
+}
+
+describe('system.health tool', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('has correct name and non-empty description', () => {
+    const { sdk } = buildSdkStub(async () => ({
+      balance: { coinType: '0x2::sui::SUI', balance: '0', coinBalance: '0' },
+    }));
+    const tool = healthTool(sdk);
+    expect(tool.name).toBe('system.health');
+    expect(typeof tool.description).toBe('string');
+    expect((tool.description ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('returns status ok with all probes green and the keypair address', async () => {
+    const { sdk, keypair } = buildSdkStub(async () => ({
+      balance: { coinType: '0x2::sui::SUI', balance: '12345', coinBalance: '12345' },
+    }));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(fakeResponse(true, 200));
+
+    const tool = healthTool(sdk);
+    const res = (await tool.handler({})) as HealthResult;
+
+    expect(res.status).toBe('ok');
+    expect(res.address).toBe(keypair.toSuiAddress());
+    expect(res.checks.rpc!.ok).toBe(true);
+    expect(res.checks.rpc!.detail).toContain('12345');
+    expect(res.checks.relayer!.ok).toBe(true);
+    expect(res.checks.walrus!.ok).toBe(true);
+    expect(res.checks.seal!.ok).toBe(true);
+  });
+
+  it('marks rpc failure as degraded while relayer can still be ok', async () => {
+    const { sdk } = buildSdkStub(async () => {
+      throw new Error('grpc unreachable');
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(fakeResponse(true, 200));
+
+    const tool = healthTool(sdk);
+    const res = (await tool.handler({})) as HealthResult;
+
+    expect(res.status).toBe('degraded');
+    expect(res.checks.rpc!.ok).toBe(false);
+    expect(res.checks.rpc!.detail).toContain('grpc unreachable');
+    expect(res.checks.relayer!.ok).toBe(true);
+  });
+
+  it('cascades relayer failure into walrus and seal probes', async () => {
+    const { sdk } = buildSdkStub(async () => ({
+      balance: { coinType: '0x2::sui::SUI', balance: '7', coinBalance: '7' },
+    }));
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('relayer offline'));
+
+    const tool = healthTool(sdk);
+    const res = (await tool.handler({})) as HealthResult;
+
+    expect(res.status).toBe('degraded');
+    expect(res.checks.relayer!.ok).toBe(false);
+    expect(res.checks.relayer!.detail).toContain('relayer offline');
+    expect(res.checks.walrus!.ok).toBe(false);
+    expect(res.checks.seal!.ok).toBe(false);
   });
 });
