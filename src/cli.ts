@@ -14,6 +14,8 @@ import {
 import { sendTool, historyTool } from './tools/channel-messaging.js';
 import { joinTool } from './tools/channel-subscribe.js';
 import { writeTool as memoryWriteTool, readTool as memoryReadTool } from './tools/memory.js';
+import { debugTool } from './tools/system.js';
+import { ToolLog } from './logging.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -31,8 +33,9 @@ async function main(): Promise<void> {
     }
   }
 
-  const dispatcher = new Dispatcher();
   const config = loadConfig();
+  const toolLog = new ToolLog(config.logDir);
+  const dispatcher = new Dispatcher(toolLog);
   const sdk = getSdk(config);
   dispatcher.register(whoamiTool(sdk));
   dispatcher.register(verifyTool(sdk));
@@ -46,6 +49,7 @@ async function main(): Promise<void> {
   dispatcher.register(joinTool(sdk));
   dispatcher.register(memoryWriteTool(sdk));
   dispatcher.register(memoryReadTool(sdk));
+  dispatcher.register(debugTool(toolLog));
   await startServer(dispatcher);
 }
 

@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod';
+import type { ToolLog } from '../logging.js';
 
 export interface ToolError {
   code: string;
@@ -27,6 +28,8 @@ function isToolError(e: unknown): e is ToolError {
 export class Dispatcher {
   private tools = new Map<string, ToolDef<unknown>>();
 
+  constructor(private log?: ToolLog) {}
+
   register<T>(def: ToolDef<T>): void {
     this.tools.set(def.name, def as unknown as ToolDef<unknown>);
   }
@@ -39,32 +42,59 @@ export class Dispatcher {
   }
 
   async invoke(name: string, args: unknown): Promise<unknown> {
-    const tool = this.tools.get(name);
-    if (!tool) {
-      const err: ToolError = {
-        code: 'UNKNOWN_TOOL',
-        message: `Unknown tool: ${name}`,
-      };
-      throw err;
-    }
-    const parsed = tool.schema.safeParse(args);
-    if (!parsed.success) {
-      const err: ToolError = {
-        code: 'INVALID_ARGS',
-        message: 'Argument validation failed',
-        details: parsed.error.flatten(),
-      };
-      throw err;
-    }
+    const start = Date.now();
+    let errorCode: string | null = null;
     try {
-      return await tool.handler(parsed.data);
+      const tool = this.tools.get(name);
+      if (!tool) {
+        errorCode = 'UNKNOWN_TOOL';
+        const err: ToolError = {
+          code: 'UNKNOWN_TOOL',
+          message: `Unknown tool: ${name}`,
+        };
+        throw err;
+      }
+      const parsed = tool.schema.safeParse(args);
+      if (!parsed.success) {
+        errorCode = 'INVALID_ARGS';
+        const err: ToolError = {
+          code: 'INVALID_ARGS',
+          message: 'Argument validation failed',
+          details: parsed.error.flatten(),
+        };
+        throw err;
+      }
+      try {
+        return await tool.handler(parsed.data);
+      } catch (e: unknown) {
+        if (isToolError(e)) {
+          errorCode = e.code;
+          throw e;
+        }
+        errorCode = 'INTERNAL_ERROR';
+        const err: ToolError = {
+          code: 'INTERNAL_ERROR',
+          message: e instanceof Error ? e.message : String(e),
+        };
+        throw err;
+      }
     } catch (e: unknown) {
-      if (isToolError(e)) throw e;
-      const err: ToolError = {
-        code: 'INTERNAL_ERROR',
-        message: e instanceof Error ? e.message : String(e),
-      };
-      throw err;
+      if (!errorCode) {
+        errorCode =
+          (typeof e === 'object' && e !== null && 'code' in e
+            ? String((e as { code: unknown }).code)
+            : null) ?? 'INTERNAL_ERROR';
+      }
+      throw e;
+    } finally {
+      if (this.log) {
+        this.log.record({
+          tool: name,
+          durationMs: Date.now() - start,
+          errorCode,
+          inputHash: this.log.inputHash(args),
+        });
+      }
     }
   }
 }
