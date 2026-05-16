@@ -11,6 +11,7 @@ import {
   kickTool,
   leaveTool,
 } from './tools/channel-lifecycle.js';
+import { sendTool, historyTool } from './tools/channel-messaging.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -38,6 +39,8 @@ async function main(): Promise<void> {
   dispatcher.register(inviteTool(sdk));
   dispatcher.register(kickTool(sdk));
   dispatcher.register(leaveTool(sdk));
+  dispatcher.register(sendTool(sdk));
+  dispatcher.register(historyTool(sdk));
   await startServer(dispatcher);
 }
 
