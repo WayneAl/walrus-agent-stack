@@ -1,8 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { sendTool, historyTool } from '../../src/tools/channel-messaging.js';
+import {
+  sendTool,
+  historyTool,
+  _resetSendLimitersForTests,
+  _resetLoopDetectorForTests,
+} from '../../src/tools/channel-messaging.js';
 import type { SdkContext } from '../../src/sdk-client.js';
 import type { Outbox } from '../../src/outbox.js';
+
+beforeEach(() => {
+  // Module-level rate limiter + loop detector keep state across tests;
+  // reset them so each case starts from a clean slate.
+  _resetSendLimitersForTests();
+});
 
 interface MockMessaging {
   sendMessage: ReturnType<typeof vi.fn>;
@@ -117,6 +128,40 @@ describe('channel messaging tools', () => {
         parent_message_id: null,
         refs: [],
       });
+    });
+
+    it('throws RATE_LIMITED on the 11th send within the window and does not enqueue', async () => {
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      // Both limiters share the same `${channel_id}:${sender}` key, and the
+      // loop detector trips at 5 consecutive same-key sends. To isolate the
+      // rate limiter's 10/min cap, reset just the loop detector between
+      // sends — leaves the rate limiter's window untouched.
+      for (let i = 0; i < 10; i++) {
+        await tool.handler({ channel_id: 'uuid-rl', content: `msg-${i}` });
+        _resetLoopDetectorForTests();
+      }
+      // 11th must be rejected by the rate limiter (not by the loop detector,
+      // which we just reset). The throw must NOT enqueue to the outbox.
+      await expect(
+        tool.handler({ channel_id: 'uuid-rl', content: 'overflow' }),
+      ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+      expect(env.messaging.sendMessage).toHaveBeenCalledTimes(10);
+      expect(outboxStub.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('throws LOOP_DETECTED on the 5th consecutive send from same sender on same channel', async () => {
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      // 5 consecutive observe() calls on the same key trip the detector at the
+      // 5th. The rate limiter (cap 10) does NOT fire first, so any throw here
+      // is the loop detector. Loop-detector throw must NOT enqueue to outbox.
+      for (let i = 0; i < 4; i++) {
+        await tool.handler({ channel_id: 'uuid-ld', content: `streak-${i}` });
+      }
+      await expect(
+        tool.handler({ channel_id: 'uuid-ld', content: 'streak-4' }),
+      ).rejects.toMatchObject({ code: 'LOOP_DETECTED' });
+      expect(env.messaging.sendMessage).toHaveBeenCalledTimes(4);
+      expect(outboxStub.enqueue).not.toHaveBeenCalled();
     });
 
     it('queues to outbox and throws RELAYER_UNREACHABLE when sendMessage hits an infra error', async () => {

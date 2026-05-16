@@ -4,6 +4,36 @@ import type { ToolDef } from '../mcp/dispatch.js';
 import { ChannelSendArgs, ChannelHistoryArgs } from '../schemas.js';
 import type { SdkContext } from '../sdk-client.js';
 import type { Outbox } from '../outbox.js';
+import { RateLimiter } from '../rate-limiter.js';
+import { LoopDetector } from '../loop-detector.js';
+
+/**
+ * Module-level guards applied to channel.send: cap sustained per-channel send
+ * volume and detect a single sender flooding back-to-back messages. Both are
+ * hard rejections — they do NOT enqueue to the outbox (that path is reserved
+ * for transient infra failures like RELAYER_UNREACHABLE).
+ */
+const sendRateLimiter = new RateLimiter(10, 60_000);
+const loopDetector = new LoopDetector(5);
+
+/**
+ * Test-only: reset both module-level limiters so cases don't bleed state
+ * across `beforeEach` boundaries. Not part of the public tool surface.
+ */
+export function _resetSendLimitersForTests(): void {
+  sendRateLimiter.reset();
+  loopDetector.reset();
+}
+
+/**
+ * Test-only: reset just the loop detector. Used by the rate-limiter wiring
+ * test, which needs to drive 10+ same-key sends through the handler without
+ * the loop detector tripping at message 5 (both limiters share the same
+ * composite key). Not part of the public tool surface.
+ */
+export function _resetLoopDetectorForTests(): void {
+  loopDetector.reset();
+}
 
 /**
  * Recognize transient network/relayer failures that we should queue for retry
@@ -80,6 +110,17 @@ export function sendTool(
     schema: ChannelSendArgs,
     handler: async (args) => {
       const { channel_id, content, refs, agent_id, parent_message_id } = args;
+      // Rate-limit + loop-detect run BEFORE envelope construction and BEFORE
+      // the SDK call. They throw plain-object errors that bypass the outbox
+      // try/catch below — these are hard rejections, not transient infra
+      // failures, so they must not enqueue.
+      const limiterKey = `${channel_id}:${sdk.keypair.toSuiAddress()}`;
+      if (!sendRateLimiter.check(limiterKey)) {
+        throw { code: 'RATE_LIMITED', message: '>10 msgs/min on this channel' };
+      }
+      if (loopDetector.observe(limiterKey)) {
+        throw { code: 'LOOP_DETECTED', message: 'Same sender 5+ times in a row; pausing' };
+      }
       const body: MessageEnvelope = {
         type: 'text',
         text: content,
