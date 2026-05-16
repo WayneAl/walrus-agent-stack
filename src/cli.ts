@@ -4,6 +4,13 @@ import { Dispatcher } from './mcp/dispatch.js';
 import { loadConfig } from './config.js';
 import { getSdk } from './sdk-client.js';
 import { whoamiTool, verifyTool } from './tools/identity.js';
+import {
+  createTool,
+  membersTool,
+  inviteTool,
+  kickTool,
+  leaveTool,
+} from './tools/channel-lifecycle.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -26,6 +33,11 @@ async function main(): Promise<void> {
   const sdk = getSdk(config);
   dispatcher.register(whoamiTool(sdk));
   dispatcher.register(verifyTool(sdk));
+  dispatcher.register(createTool(sdk));
+  dispatcher.register(membersTool(sdk));
+  dispatcher.register(inviteTool(sdk));
+  dispatcher.register(kickTool(sdk));
+  dispatcher.register(leaveTool(sdk));
   await startServer(dispatcher);
 }
 
