@@ -4,5 +4,9 @@ dist/
 .DS_Store
 .env
 .env.local
+.env.testnet
+.env.testnet.local
+.env.mainnet
+.env.mainnet.local
 ~/.walrus-agent-stack/
 coverage/
