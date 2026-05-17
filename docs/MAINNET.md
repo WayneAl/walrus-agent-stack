@@ -38,15 +38,37 @@ the verification date.
    `relayer/README.md`, configure it with a mainnet `SUI_RPC_URL`
    (`https://fullnode.mainnet.sui.io:443`), and note the relayer's URL.
 
-2. **Discover mainnet Seal key servers.** The `@mysten/seal` SDK no
-   longer ships an allowlist helper. Consult the official Seal
-   documentation for the current mainnet key-server object IDs. Record
-   them as a comma-separated list, e.g.
-   `0x<id1>,0x<id2>` — typically two or three servers.
+2. **Get a mainnet Seal key-server object ID from a verified provider.**
+   Per the [Seal Pricing page](https://seal-docs.wal.app/Pricing) (as of
+   2026-05-17), **there is no public open-mode mainnet Seal key server**.
+   Every mainnet provider issues a permissioned (per-customer) object
+   ID after you contact them. Verified providers:
 
-   > **TBD:** discover mainnet key servers from `@mysten/seal` docs or
-   > the Mysten Labs Seal deployment manifest, then replace this note
-   > with the concrete IDs.
+   | Provider              | How to onboard                                                                                              |
+   | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+   | **Enoki (Mysten Labs)** | Sign up at <https://enoki.mystenlabs.com>, create an account, request Seal key server access via the dashboard form. Easiest path if you want a Mysten-operated server. |
+   | Ruby Nodes            | Contact via <https://rubynodes.io>                                                                          |
+   | NodeInfra             | Contact via <https://nodeinfra.com>                                                                         |
+   | Overclock             | Contact via <https://overclock.run>                                                                         |
+   | Studio Mirai          | Contact via <https://studiomirai.cloud>                                                                     |
+   | H2O Nodes             | Contact via <https://h2o-nodes.com>                                                                         |
+   | Triton One            | Contact via <https://triton.one>                                                                            |
+   | Natsai                | Contact via <https://natsai.xyz>                                                                            |
+
+   For a quorum that survives one provider going down, get permissioned
+   object IDs from **at least two** independent providers and pass both
+   as `SEAL_SERVERS=0x<provider1>,0x<provider2>`.
+
+   The Seal team has also announced a **decentralized committee for
+   mainnet** ("Available soon" on the Pricing page) — once it ships,
+   a single committee aggregator object ID will replace the multi-provider
+   setup. Watch the Seal docs for the release.
+
+   For reference, the Seal Move package IDs themselves are baked into
+   `src/config.ts` (`SEAL_PACKAGE_ID_MAINNET =
+   0xcb83a248bda5f7a0a431e6bf9e96d184e604130ec5218696e3f1211113b447b7`);
+   the package is already deployed on mainnet — only the key servers
+   are gated.
 
 3. **Provision a mainnet wallet.**
 
@@ -107,7 +129,7 @@ failure on mainnet (for example, a Seal key-server mismatch surfaced as
 | `SUI_NETWORK`    | `mainnet`                                  | user                                    |
 | `SUI_PRIVATE_KEY`| `suiprivkey1qz...` (mainnet-funded wallet) | `bin/init.js`                           |
 | `RELAYER_URL`    | self-hosted mainnet relayer URL            | user (see prereqs)                      |
-| `SEAL_SERVERS`   | comma-separated mainnet Seal object IDs    | user (Seal docs — TBD)                  |
+| `SEAL_SERVERS`   | comma-separated mainnet Seal object IDs    | per-customer, from a verified provider (Enoki, Ruby Nodes, …) — see prereq #2 |
 | `SUI_RPC_URLS`   | `https://fullnode.mainnet.sui.io:443`      | default                                 |
 
 The sui-stack-messaging package IDs themselves do **not** need to be
