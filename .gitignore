@@ -10,3 +10,4 @@ dist/
 .env.mainnet.local
 ~/.walrus-agent-stack/
 coverage/
+tmp/

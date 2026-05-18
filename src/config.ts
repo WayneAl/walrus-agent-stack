@@ -7,6 +7,9 @@ export const ConfigSchema = z.object({
   sealServers: z.array(z.string()),
   rpcUrls: z.array(z.string().url()).min(1),
   logDir: z.string(),
+  walrusPublisherUrl: z.string().url(),
+  walrusAggregatorUrl: z.string().url(),
+  walrusStorageEpochs: z.number().int().positive(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -25,6 +28,11 @@ const DEFAULT_RELAYER_TESTNET = 'https://relayer.testnet.example.com';
 const DEFAULT_RELAYER_MAINNET = 'https://relayer.mainnet.example.com';
 const DEFAULT_RPC_TESTNET = 'https://fullnode.testnet.sui.io:443';
 const DEFAULT_RPC_MAINNET = 'https://fullnode.mainnet.sui.io:443';
+
+const DEFAULT_WALRUS_PUBLISHER_TESTNET = 'https://publisher.walrus-testnet.walrus.space';
+const DEFAULT_WALRUS_AGGREGATOR_TESTNET = 'https://aggregator.walrus-testnet.walrus.space';
+const DEFAULT_WALRUS_PUBLISHER_MAINNET = 'https://publisher.walrus-mainnet.walrus.space';
+const DEFAULT_WALRUS_AGGREGATOR_MAINNET = 'https://aggregator.walrus-mainnet.walrus.space';
 
 // Seal Move package IDs (verified from https://seal-docs.wal.app/UsingSeal).
 export const SEAL_PACKAGE_ID_TESTNET =
@@ -93,5 +101,12 @@ export function loadConfig(env: ConfigEnv = process.env): Config {
     sealServers: (env.SEAL_SERVERS ?? '').split(',').filter(Boolean),
     rpcUrls: (env.SUI_RPC_URLS ?? (network === 'mainnet' ? DEFAULT_RPC_MAINNET : DEFAULT_RPC_TESTNET)).split(','),
     logDir: env.LOG_DIR ?? `${process.env.HOME}/.walrus-agent-stack/log`,
+    walrusPublisherUrl:
+      env.WALRUS_PUBLISHER_URL ??
+      (network === 'mainnet' ? DEFAULT_WALRUS_PUBLISHER_MAINNET : DEFAULT_WALRUS_PUBLISHER_TESTNET),
+    walrusAggregatorUrl:
+      env.WALRUS_AGGREGATOR_URL ??
+      (network === 'mainnet' ? DEFAULT_WALRUS_AGGREGATOR_MAINNET : DEFAULT_WALRUS_AGGREGATOR_TESTNET),
+    walrusStorageEpochs: env.WALRUS_STORAGE_EPOCHS ? Number(env.WALRUS_STORAGE_EPOCHS) : 5,
   });
 }

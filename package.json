@@ -16,6 +16,7 @@
     "test:int": "vitest run tests/integration",
     "test:e2e": "bash tests/e2e/d2-demo.sh",
     "test:e2e:mjs": "node tests/e2e/d2-demo.mjs",
+    "test:e2e:phase7": "node scripts/phase7-rehearsal.mjs",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "smoke": "node dist/cli.js --health"

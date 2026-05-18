@@ -1,5 +1,8 @@
 import { SuiGrpcClient } from '@mysten/sui/grpc';
-import { createSuiStackMessagingClient } from '@mysten/sui-stack-messaging';
+import {
+  createSuiStackMessagingClient,
+  WalrusHttpStorageAdapter,
+} from '@mysten/sui-stack-messaging';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import type { Config } from './config.js';
 import { loadKeypair } from './wallet.js';
@@ -37,6 +40,13 @@ export function getSdk(config: Config): SdkContext {
       sessionKey: { signer: keypair },
     },
     relayer: { relayerUrl: config.relayerUrl },
+    attachments: {
+      storageAdapter: new WalrusHttpStorageAdapter({
+        publisherUrl: config.walrusPublisherUrl,
+        aggregatorUrl: config.walrusAggregatorUrl,
+        epochs: config.walrusStorageEpochs,
+      }),
+    },
   });
   cached = { client, keypair, config };
   return cached;
