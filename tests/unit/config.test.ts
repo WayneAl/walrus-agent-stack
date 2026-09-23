@@ -43,6 +43,14 @@ describe('loadConfig', () => {
     expect(again.config.privateKey).toBe(config.privateKey);
   });
 
+  it('defaults Seal servers on testnet when a user-supplied config omits them', () => {
+    const cfg = loadConfig({ WAS_HOME: home, SUI_PRIVATE_KEY: key });
+    expect(cfg.sealServers).toEqual([
+      KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-1'],
+      KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-2'],
+    ]);
+  });
+
   it('process env wins over config.env', () => {
     bootstrapConfig({ WAS_HOME: home });
     const cfg = loadConfig({

@@ -166,7 +166,11 @@ export function bootstrapConfig(env: ConfigEnv = process.env): BootstrapResult {
     privateKey: merged.SUI_PRIVATE_KEY,
     network,
     relayerUrl: merged.RELAYER_URL || undefined,
-    sealServers: (merged.SEAL_SERVERS ?? '').split(',').filter(Boolean),
+    sealServers: merged.SEAL_SERVERS
+      ? merged.SEAL_SERVERS.split(',').filter(Boolean)
+      : network === 'testnet'
+        ? [KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-1'], KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-2']]
+        : [],
     rpcUrls: (merged.SUI_RPC_URLS ?? (network === 'mainnet' ? DEFAULT_RPC_MAINNET : DEFAULT_RPC_TESTNET)).split(','),
     home,
     logDir: merged.LOG_DIR ?? join(home, 'log'),
