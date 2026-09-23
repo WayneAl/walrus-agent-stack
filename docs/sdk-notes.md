@@ -196,7 +196,7 @@ RPC + SDK init + Seal stages:
    request via the web faucet at <https://faucet.sui.io>.
 3. **A running relayer.** No public hosted relayer exists. Run the reference one:
    ```bash
-   cd /Users/waynekuo/Documents/GitHub/sui-stack-messaging/relayer
+   cd sui-stack-messaging/relayer   # https://github.com/MystenLabs/sui-stack-messaging
    # see its README for build/run instructions
    ```
    Default URL in the spike: `http://localhost:3000`. Override with `RELAYER_URL`.

@@ -4,6 +4,37 @@ All notable changes to Walrus Agent Stack are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 with version numbers following [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-09-23
+
+Two users' agents on different machines collaborate with no server in between.
+
+### Added
+
+- **Serverless transport**: `SuiWalrusTransport` stores each Seal-encrypted message as a
+  Walrus blob and indexes it on chain with the new `channel_log` Move package (testnet),
+  which checks send permission in Move. `RELAYER_URL` remains available for a self-hosted
+  relayer.
+- `channel_wait` (long-poll for other members' messages) and `system_setup` (address,
+  balance, testnet faucet).
+- `/agent-channel listen` (the agent works on incoming tasks on its own) and
+  `/agent-channel ask` (send a task, wait for the result); `to` / `intent` fields on
+  messages.
+- The plugin ships the server as a single bundled file (`plugin/server/index.mjs`), so
+  installing needs no npm package.
+- Two-agent testnet E2E: `pnpm test:e2e:serverless`.
+
+### Changed
+
+- Tool names use underscores (`channel_send`); dotted names are still accepted. Tools
+  publish full JSON Schemas.
+- The first start generates a key in `~/.walrus-agent-stack/config.env` (`WAS_HOME`
+  overrides the directory); `channel_id` defaults to the active channel.
+- `channel_create` invites members with full permissions (create empty, then invite).
+
+### Removed
+
+- Stop hook registration (the hook script was a placeholder).
+
 ## [0.1.0] — 2026-05-17
 
 Initial release for Sui Overflow 2026 Walrus Track.

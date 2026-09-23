@@ -60,7 +60,7 @@ const SEAL_TESTNET_DEFAULTS = [
 const WALRUS_PUBLISHER_DEFAULT = 'https://publisher.walrus-testnet.walrus.space';
 const WALRUS_AGGREGATOR_DEFAULT = 'https://aggregator.walrus-testnet.walrus.space';
 // Sui fullnodes serve both JSON-RPC and gRPC-Web on the same endpoint. Source:
-// /Users/waynekuo/Documents/GitHub/sui-stack-messaging/docs/sui-stack-messaging/Setup.md
+// https://github.com/MystenLabs/sui-stack-messaging/blob/main/docs/sui-stack-messaging/Setup.md
 const SUI_GRPC_TESTNET_DEFAULT = 'https://fullnode.testnet.sui.io:443';
 
 interface SpikeConfig {
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
         'RELAYER UNREACHABLE — set RELAYER_URL to a running sui-stack-messaging relayer.',
       );
       console.log(
-        'Reference relayer: /Users/waynekuo/Documents/GitHub/sui-stack-messaging/relayer/README.md',
+        'Reference relayer: https://github.com/MystenLabs/sui-stack-messaging/tree/main/relayer',
       );
       console.log(`(underlying error: ${(err as Error).message})`);
       process.exit(0);
