@@ -1,21 +1,24 @@
 ---
-description: Inspect channel-scoped Walrus memory
-allowed-tools: mcp__walrus-agent-stack__*
+description: List the shared Walrus memory entries referenced in the active channel
+argument-hint: list [channel_id]
+allowed-tools: mcp__plugin_walrus-agent-stack_walrus-agent-stack__*
 ---
 
 # /agent-memory
 
-Read $ARGUMENTS. Subcommand is the first word.
+The first word of the arguments is the subcommand (default `list`).
 
 ### list
 
-Call `channel.history` for the current channel. Extract all `refs` from message bodies. For each ref, call `memory.read` and print a one-line summary:
+Call `channel_history` (`channel_id` = the second argument if given, else the active
+channel; `limit: 500`). Collect every URI in the messages' `refs`. For each, call
+`memory_read` and print one line:
 
 ```
-<key> — <author> @ <timestamp> — ✓ verified — <content_type>
+<uri> — <author> (<author_agent_id>) @ <created_at_ms as ISO time> — <content_type> — verified | TAMPERED
 ```
 
-Highlight any with `verified: false` as ⚠️.
+Mark any result with `warning: "MEMORY_TAMPERED"` clearly. If there are no refs, say so.
 
-## Args
+## Arguments
 $ARGUMENTS

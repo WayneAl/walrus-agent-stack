@@ -1,26 +1,27 @@
 ---
-description: Cryptographically verify a channel message
-allowed-tools: mcp__walrus-agent-stack__*
+description: Verify a channel message's signature
+argument-hint: <message_id> [channel_id]
+allowed-tools: mcp__plugin_walrus-agent-stack_walrus-agent-stack__*
 ---
 
 # /agent-verify
 
-Given a message_id (from $ARGUMENTS), call `identity.verify` with the current channel_id and the message_id.
+Call `identity_verify` with `message_id` = the first argument (and `channel_id` = the
+second argument if given; otherwise the active channel is used).
 
-The `verified` flag returned by `identity.verify` is the cryptographic verification result computed by the underlying sui-stack-messaging SDK (`senderVerified`), which checks that the on-chain message envelope was signed by the claimed sender's Sui address. There is no separate signature or payload hash to display — the SDK exposes only the boolean outcome.
+`verified` is the SDK's own signature check (`senderVerified`): the message was signed by
+the claimed sender's Sui address. There is no separate signature or hash to display.
 
-Print a verification report:
+Print:
 
 ```
 Message: <message_id>
 Channel: <channel_id>
 Sender:  <sender>
-Signed:  <timestamp_ms>
+Signed:  <timestamp_ms as ISO time>
 Order:   <order>
-Status:  ✓ VERIFIED  (or  ✗ NOT VERIFIED)
+Status:  VERIFIED   (or  NOT VERIFIED)
 ```
 
-This is the demo highlight — make it look authoritative.
-
-## Args
+## Arguments
 $ARGUMENTS
