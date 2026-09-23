@@ -11,3 +11,4 @@ dist/
 ~/.walrus-agent-stack/
 coverage/
 tmp/
+move/*/build/

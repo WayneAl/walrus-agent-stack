@@ -40,6 +40,14 @@ export const SEAL_PACKAGE_ID_TESTNET =
 export const SEAL_PACKAGE_ID_MAINNET =
   '0xcb83a248bda5f7a0a431e6bf9e96d184e604130ec5218696e3f1211113b447b7';
 
+// `channel_log` Move package (move/channel_log): the serverless message index
+// the SuiWalrusTransport posts to. Published on testnet 2026-09-23, digest
+// 8ohK5NxBBsuqWgBZbLJ9cLiky8gaPRkUMXEdsGtbn3o9. Not yet on mainnet.
+export const CHANNEL_LOG_TESTNET = {
+  packageId: '0x04d4a5ff8e98fc8eb51f946b46cb07c2152d0f142e62be312e19425094e913f1',
+  registryId: '0xab7abf4bdc9f1374dc2ae65b295e0e01d54912525e96e76db807ff1016066a64',
+} as const;
+
 // Known Seal key-server object IDs (source: https://seal-docs.wal.app/Pricing).
 //
 // All testnet servers below run in "Open mode" — no API key, source-IP rate

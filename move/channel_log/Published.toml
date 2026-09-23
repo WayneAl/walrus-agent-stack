@@ -1,0 +1,12 @@
+# Written by hand after publishing through the TS SDK (tmp/publish-channel-log.mjs);
+# same shape as the Sui CLI's generated file.
+
+[published.testnet]
+chain-id = "4c78adac"
+published-at = "0x04d4a5ff8e98fc8eb51f946b46cb07c2152d0f142e62be312e19425094e913f1"
+original-id = "0x04d4a5ff8e98fc8eb51f946b46cb07c2152d0f142e62be312e19425094e913f1"
+version = 1
+build-config = { flavor = "sui", edition = "2024" }
+upgrade-capability = "0x6fea3df1e44cc3d5b3e09b9dcd536e906a65bd5fd99404573d0264fa3311e1b6"
+# publish digest 8ohK5NxBBsuqWgBZbLJ9cLiky8gaPRkUMXEdsGtbn3o9; shared Registry below
+registry = "0xab7abf4bdc9f1374dc2ae65b295e0e01d54912525e96e76db807ff1016066a64"

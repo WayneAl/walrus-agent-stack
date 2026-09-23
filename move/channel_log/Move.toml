@@ -1,0 +1,7 @@
+[package]
+name = "channel_log"
+edition = "2024"
+
+[dependencies]
+sui_groups = { git = "https://github.com/MystenLabs/sui-groups.git", subdir = "move/packages/sui_groups", rev = "ea766818b90e162341e885a855718388edcc8e99" }
+sui_stack_messaging = { git = "https://github.com/MystenLabs/sui-stack-messaging.git", subdir = "move/packages/sui_stack_messaging", rev = "4bbe056a8af56ed4f056c6ad1a406f58b09fa3e3" }
