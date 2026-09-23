@@ -47,7 +47,7 @@ export function listTools(dispatcher: Dispatcher): {
 
 export async function startServer(dispatcher: Dispatcher): Promise<void> {
   const server = new Server(
-    { name: 'walrus-agent-stack-mcp', version: '0.1.0' },
+    { name: 'walrus-agent-stack-mcp', version: '0.2.0' },
     { capabilities: { tools: {} } },
   );
 

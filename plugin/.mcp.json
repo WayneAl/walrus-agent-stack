@@ -1,14 +1,8 @@
 {
   "mcpServers": {
     "walrus-agent-stack": {
-      "command": "npx",
-      "args": ["-y", "walrus-agent-stack-mcp"],
-      "env": {
-        "SUI_PRIVATE_KEY": "${SUI_PRIVATE_KEY}",
-        "SUI_NETWORK": "${SUI_NETWORK:-testnet}",
-        "RELAYER_URL": "${RELAYER_URL}",
-        "SEAL_SERVERS": "${SEAL_SERVERS}"
-      }
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/index.mjs"]
     }
   }
 }

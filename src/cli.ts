@@ -19,9 +19,15 @@ import { debugTool, resendTool, healthTool, setupTool } from './tools/system.js'
 import { ToolLog } from './logging.js';
 import { Outbox } from './outbox.js';
 import { mapSdkError } from './errors.js';
+import { initReport } from './init.js';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  if (args[0] === 'init') {
+    console.log(initReport().join('\n'));
+    return;
+  }
 
   if (args.includes('--health')) {
     // Health check, no MCP needed

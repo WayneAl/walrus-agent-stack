@@ -1,23 +1,10 @@
 {
   "name": "walrus-agent-stack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
   "author": {
     "name": "Wayne Kuo",
     "url": "https://github.com/WayneAl"
   },
-  "homepage": "https://github.com/WayneAl/walrus-agent-stack",
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/hooks/stop.sh"
-          }
-        ]
-      }
-    ]
-  }
+  "homepage": "https://github.com/WayneAl/walrus-agent-stack"
 }

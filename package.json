@@ -1,6 +1,6 @@
 {
   "name": "walrus-agent-stack-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "bundle": "pnpm build && node scripts/bundle.mjs",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -45,6 +46,7 @@
     "@types/node": "^25.8.0",
     "@typescript-eslint/eslint-plugin": "^8.59.3",
     "@typescript-eslint/parser": "^8.59.3",
+    "esbuild": "^0.28.2",
     "eslint": "^10.4.0",
     "prettier": "^3.8.3",
     "tsx": "^4.22.0",
