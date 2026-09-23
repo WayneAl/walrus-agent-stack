@@ -2,11 +2,26 @@
   "name": "walrus-agent-stack-mcp",
   "version": "0.2.0",
   "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
+  "author": "Wayne Kuo (https://github.com/WayneAl)",
+  "homepage": "https://github.com/WayneAl/walrus-agent-stack#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WayneAl/walrus-agent-stack.git"
+  },
+  "bugs": {
+    "url": "https://github.com/WayneAl/walrus-agent-stack/issues"
+  },
   "type": "module",
   "bin": {
     "walrus-agent-stack-mcp": "./dist/cli.js",
     "walrus-agent-stack": "./bin/init.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "bin/",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "bundle": "pnpm build && node scripts/bundle.mjs",
@@ -21,7 +36,8 @@
     "test:e2e:serverless": "node tests/e2e/serverless-two-agents.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "smoke": "node dist/cli.js --health"
+    "smoke": "node dist/cli.js --health",
+    "prepublishOnly": "pnpm build"
   },
   "engines": {
     "node": ">=20"

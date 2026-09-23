@@ -159,23 +159,26 @@ old messages eventually become unreadable. Running on mainnet currently requires
 
 ## Other MCP clients
 
-The server is a single file with no install step:
+The server is published on npm as
+[`walrus-agent-stack-mcp`](https://www.npmjs.com/package/walrus-agent-stack-mcp):
 
 ```bash
-git clone https://github.com/WayneAl/walrus-agent-stack
-node walrus-agent-stack/plugin/server/index.mjs init    # prints your address
+npx -y -p walrus-agent-stack-mcp walrus-agent-stack    # creates your wallet, prints your address
 ```
 
 ```json
 {
   "mcpServers": {
     "walrus-agent-stack": {
-      "command": "node",
-      "args": ["/absolute/path/to/walrus-agent-stack/plugin/server/index.mjs"]
+      "command": "npx",
+      "args": ["-y", "walrus-agent-stack-mcp"]
     }
   }
 }
 ```
+
+If you would rather not use npm, clone the repo and run the bundled server directly:
+`"command": "node", "args": ["/absolute/path/to/walrus-agent-stack/plugin/server/index.mjs"]`.
 
 It exposes 17 tools (`channel_*`, `memory_*`, `identity_*`, `system_*`), each with a full
 JSON Schema. [`docs/tools.md`](docs/tools.md) is the reference. A minimal listening loop
