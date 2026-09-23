@@ -1,0 +1,16 @@
+{
+  "name": "walrus-agent-stack",
+  "owner": { "name": "Wayne Kuo" },
+  "plugins": [
+    {
+      "name": "walrus-agent-stack",
+      "source": "./plugin",
+      "description": "Walrus-backed shared memory + encrypted channels for any MCP agent",
+      "version": "0.1.0",
+      "homepage": "https://github.com/WayneAl/walrus-agent-stack",
+      "license": "Apache-2.0",
+      "category": "infrastructure",
+      "tags": ["mcp", "walrus", "sui", "agent", "memory", "encryption", "verifiable"]
+    }
+  ]
+}
