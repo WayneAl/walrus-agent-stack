@@ -1,28 +1,28 @@
 # Testnet Deployment Notes
 
 Sui testnet is the **primary supported environment** for walrus-agent-stack
-today. All integration tests, the D2 demo script, and the `bin/init.js`
-faucet flow target testnet.
+today. The default transport is serverless: messages are Walrus blobs indexed by the
+`channel_log` Move package on Sui, so no relayer is needed. The `channel_log` package
+is published on testnet only.
 
 ## Quick start
 
 ```bash
-# 1. Generate a fresh keypair + hit the testnet faucet
-pnpm tsx scripts/gen-testnet-wallet.ts        # one-shot, prints SUI_PRIVATE_KEY=...
-#   ── or ──
-npx walrus-agent-stack                         # initialises ~/.walrus-agent-stack/
+# 1. Generate a key (first start does this too) and print the address
+node plugin/server/index.mjs init         # writes ~/.walrus-agent-stack/config.env
 
-# 2. Run a sui-stack-messaging relayer (required for channel.send / history)
-cd /path/to/sui-stack-messaging/relayer
-SUI_RPC_URL=https://fullnode.testnet.sui.io:443 ... cargo run    # see relayer/README.md
+# 2. Fund it: in Claude Code run /agent-stack setup (faucet), or open
+#    https://faucet.sui.io/?address=<address>
 
-# 3. Set environment and run the MCP server
-export SUI_PRIVATE_KEY=suiprivkey1qz...
-export SUI_NETWORK=testnet
-export RELAYER_URL=http://localhost:3000
-export SEAL_SERVERS=<paste from below>
-pnpm build && node dist/cli.js
+# 3. Run the MCP server directly (the plugin does this for you)
+node plugin/server/index.mjs              # or: pnpm build && node dist/cli.js
 ```
+
+`~/.walrus-agent-stack/config.env` (or env vars, which win) can override
+`SUI_PRIVATE_KEY`, `SEAL_SERVERS`, `SUI_RPC_URLS`, `WALRUS_PUBLISHER_URL`,
+`WALRUS_AGGREGATOR_URL` and `WALRUS_STORAGE_EPOCHS` (default 30; testnet blobs expire
+after that many epochs). With `SEAL_SERVERS` unset the two Mysten testnet key servers
+are used. Setting `RELAYER_URL` switches to a self-hosted sui-stack-messaging relayer.
 
 ## Network constants
 
@@ -35,9 +35,13 @@ pnpm build && node dist/cli.js
 | Walrus aggregator            | `https://aggregator.walrus-testnet.walrus.space`                                      |
 | Seal Move package            | `0x4016869413374eaa71df2a043d1660ed7bc927ab7962831f8b07efbc7efdb2c3`                  |
 | sui-stack-messaging package  | `0x047696be0e98f1b47a99727fecf2955cadb23c56f67c6b872b74e3ad59d51b46` (auto-detected)  |
+| `channel_log` package        | `0x04d4a5ff8e98fc8eb51f946b46cb07c2152d0f142e62be312e19425094e913f1`                  |
+| `channel_log` Registry       | `0xab7abf4bdc9f1374dc2ae65b295e0e01d54912525e96e76db807ff1016066a64` (shared)         |
 
 Source: <https://seal-docs.wal.app/UsingSeal> + `@mysten/sui-stack-messaging`
-exported constants. Re-verify before mainnet cutover.
+exported constants; `channel_log` from its publish (tx
+`8ohK5NxBBsuqWgBZbLJ9cLiky8gaPRkUMXEdsGtbn3o9`, source in `move/channel_log`, IDs in
+`CHANNEL_LOG_TESTNET` in `src/config.ts`). Re-verify before mainnet cutover.
 
 ## Seal key servers — pick at least two
 
@@ -102,7 +106,7 @@ SEAL_SERVERS=0xb012378c9f3799fb5b1a7083da74a4069e3c3f1c93de0b27212a5799ce1e1e98
 ## Verifying the setup
 
 ```bash
-# Confirm RPC + gRPC + Seal-only path (no relayer, no gas required)
+# Confirm RPC + gRPC + Seal-only path (no gas required)
 pnpm tsx scripts/spike-sdk.ts
 ```
 
@@ -121,15 +125,14 @@ If the Seal probe fails:
 - Network errors → check `https://fullnode.testnet.sui.io:443` is
   reachable from your network.
 
-The relayer-dependent probe (`createAndShareGroup`) will fail with
-"WALLET NOT FUNDED" until you hit the faucet, and with
-"RELAYER UNREACHABLE" until you have a relayer running on
-`RELAYER_URL`. Both are expected and don't block the Seal verification.
+The `createAndShareGroup` probe fails with "WALLET NOT FUNDED" until the wallet
+has testnet SUI; that does not block the Seal verification.
 
 ## Cross-references
 
-- `src/config.ts` — `KNOWN_SEAL_SERVERS_TESTNET`, `SEAL_TESTNET_COMMITTEE_AGGREGATOR`, `SEAL_PACKAGE_ID_TESTNET`
+- `src/config.ts` — `KNOWN_SEAL_SERVERS_TESTNET`, `SEAL_TESTNET_COMMITTEE_AGGREGATOR`, `SEAL_PACKAGE_ID_TESTNET`, `CHANNEL_LOG_TESTNET`
 - `docs/sdk-notes.md` — SDK shape, `createSuiStackMessagingClient` factory wiring
 - `docs/MAINNET.md` — when/how to move off testnet
 - `scripts/spike-sdk.ts` — runnable RPC + Seal smoke
-- `tests/e2e/d2-demo.mjs` — full two-wallet E2E (needs relayer)
+- `tests/e2e/serverless-two-agents.mjs` — two-wallet E2E over the serverless transport
+- `tests/e2e/d2-demo.mjs` — two-wallet E2E over a relayer (`RELAYER_URL`)

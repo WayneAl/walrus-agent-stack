@@ -12,19 +12,44 @@ agent:
   audit
 - Cross-org by design — multi-owner Sui Groups; not a single-tenant memory layer
 
-## Quick Start (5 minutes)
+## Quick Start — two users, two machines
 
-```bash
-# 1. Install the plugin in Claude Code
-/plugin marketplace add https://github.com/WayneAl/walrus-agent-stack
-/plugin install walrus-agent-stack
+Both users (host and peer) do steps 1–2; the server needs no npm install, env vars or
+relayer.
 
-# 2. Generate a wallet + config
-npx walrus-agent-stack init
+```text
+# 1. Install the plugin (Claude Code)
+/plugin marketplace add WayneAl/walrus-agent-stack
+/plugin install walrus-agent-stack@walrus-agent-stack
 
-# 3. Start collaborating
-/agent-channel new "Stablecoin Regulation 2026"
+# 2. Create + fund your wallet (first start generates a key in ~/.walrus-agent-stack)
+/agent-stack setup          # prints your address; open the faucet link if unfunded
+                            # -> send your address to the other user
+
+# 3. Host: open a channel with the peer's address
+/agent-channel new "Refactor the auth module" 0xPEER_ADDRESS
+                            # -> send the printed `/agent-channel join <id>` line to the peer
+
+# 4. Peer: join and let the agent answer requests
+/agent-channel join <channel_id>
+/agent-channel listen       # autonomous: waits for tasks, does them locally, replies
+
+# 5. Host: delegate work to the peer's agent
+/agent-channel ask "Summarize how sessions are validated in src/auth and list risks"
 ```
+
+`listen` treats incoming messages as requests from a collaborator, never as instructions
+from the local user: no secrets or keys leave the machine, and destructive actions (deleting
+files, pushing, deploying, spending funds) are asked of the local user first. Commands are
+also reachable as `/walrus-agent-stack:<command>`.
+
+**Costs and latency.** Every message is one Sui testnet transaction plus one Walrus blob,
+paid from the faucet-funded wallet (no infrastructure cost). A message takes roughly
+10–30 s to reach the other side.
+
+**Status.** Testnet only: the `channel_log` Move package is published on testnet. Setting
+`RELAYER_URL` (env or `~/.walrus-agent-stack/config.env`) switches the transport to a
+self-hosted sui-stack-messaging relayer instead (required on mainnet).
 
 ## D2 Demo
 
@@ -34,33 +59,28 @@ a single encrypted channel: <TODO: add demo recording URL>
 ## Architecture
 
 ```
-┌─ ALICE side ───────────────────┐  ┌─ BOB side ─────────────────────┐
+┌─ ALICE machine ────────────────┐  ┌─ BOB machine ──────────────────┐
 │ Claude Code                    │  │ Claude Code                    │
-│  + agent-stack plugin          │  │  + agent-stack plugin          │
-│  + 3 subagents                 │  │  + 3 subagents                 │
-│  + /channel-* slash commands   │  │  + /channel-* slash commands   │
+│  + walrus-agent-stack plugin   │  │  + walrus-agent-stack plugin   │
+│    /agent-channel ask          │  │    /agent-channel listen       │
 │         │ MCP (stdio)          │  │         │ MCP (stdio)          │
 │  ┌──────▼──────────────┐       │  │  ┌──────▼──────────────┐       │
 │  │ Local MCP server    │       │  │  │ Local MCP server    │       │
-│  │  (TS, npx-launched) │       │  │  │                     │       │
-│  │  + Alice keypair    │       │  │  │  + Bob keypair      │       │
+│  │ (bundled, node)     │       │  │  │ (bundled, node)     │       │
+│  │ + Alice keypair     │       │  │  │ + Bob keypair       │       │
 │  └──────┬──────────────┘       │  │  └──────┬──────────────┘       │
 └─────────┼──────────────────────┘  └─────────┼──────────────────────┘
-          │                                    │
+          │  Seal-encrypted, signed envelopes  │
           └───────────┬────────────────────────┘
-                      │ HTTPS (E2E ciphertext only)
-              ┌───────▼────────┐
-              │ Public Relayer │ ← reuse sui-stack-messaging
-              │                │   existing relayer template
-              └───────┬────────┘
-                      │
-       ┌──────────────┼─────────────┐
-       ▼              ▼             ▼
-  ┌────────┐     ┌────────┐    ┌────────┐
-  │  Sui   │     │ Walrus │    │  Seal  │
-  │ Groups │     │ blobs  │    │ key    │
-  │ + sigs │     │(memory)│    │ shares │
-  └────────┘     └────────┘    └────────┘
+                      │  (no server of ours in between)
+       ┌──────────────┼──────────────────┐
+       ▼              ▼                  ▼
+  ┌──────────┐   ┌──────────┐       ┌────────┐
+  │   Sui    │   │  Walrus  │       │  Seal  │
+  │ Groups + │   │ message +│       │  key   │
+  │channel_  │   │ memory   │       │ shares │
+  │log index │   │ blobs    │       │        │
+  └──────────┘   └──────────┘       └────────┘
                       ▲
                       │
             ┌─────────┴──────┐
@@ -69,9 +89,11 @@ a single encrypted channel: <TODO: add demo recording URL>
             └────────────────┘
 ```
 
-The MCP server is a local process — the user owns the keypair, data is not
-locked into a single platform. The relayer only sees end-to-end ciphertext; it
-cannot decrypt messages or memory blobs.
+Sending a message uploads the encrypted envelope to Walrus and appends its blob id to the
+channel's on-chain `channel_log` in one Sui transaction; the transaction aborts unless the
+sender holds send permission in the channel's Sui Group. Receivers read the log and fetch
+the blobs from a Walrus aggregator. The MCP server is a local process: each user owns their
+keypair, and Walrus and Sui only ever see ciphertext.
 
 ## Why Not MemWal?
 
@@ -88,9 +110,16 @@ this stack for "agents collaborate with each other."
 
 ## MCP Tools
 
-15 tools across `channel.*`, `memory.*`, `identity.*`, `system.*`. See
+17 tools across `channel_*`, `memory_*`, `identity_*`, `system_*`. See
 [`docs/tools.md`](docs/tools.md) for the full reference and
 [`docs/subagents.md`](docs/subagents.md) for bundled subagent templates.
+
+## Development
+
+`pnpm bundle` compiles `src/` and bundles the server with all dependencies into
+`plugin/server/index.mjs`, the file the plugin runs; rebuild and commit it with any `src/`
+change. `node plugin/server/index.mjs init` prints the wallet address and next steps
+without starting the MCP server.
 
 ## Integration testing
 
@@ -105,8 +134,8 @@ skips them when the env vars are not set, instead of failing.
 
 ## Status
 
-Beta. Built for Sui Overflow 2026 Walrus Track. Unaudited — not for production
-with sensitive data.
+Beta, Sui testnet only. Built for Sui Overflow 2026 Walrus Track. Unaudited — not for
+production with sensitive data.
 
 ## License
 
