@@ -6,15 +6,19 @@ import type { SdkContext } from '../sdk-client.js';
 import type { Outbox } from '../outbox.js';
 import { RateLimiter } from '../rate-limiter.js';
 import { LoopDetector } from '../loop-detector.js';
+import { isInfraError } from '../errors.js';
+import { resolveChannelId } from '../session.js';
 
 /**
- * Module-level guards applied to channel.send: cap sustained per-channel send
+ * Module-level guards applied to channel_send: cap sustained per-channel send
  * volume and detect a single sender flooding back-to-back messages. Both are
  * hard rejections — they do NOT enqueue to the outbox (that path is reserved
- * for transient infra failures like RELAYER_UNREACHABLE).
+ * for transient infra failures like RELAYER_UNREACHABLE). The loop threshold
+ * is high enough for an agent answering a batch of tasks in a row.
  */
+const LOOP_THRESHOLD = 20;
 const sendRateLimiter = new RateLimiter(10, 60_000);
-const loopDetector = new LoopDetector(5);
+const loopDetector = new LoopDetector(LOOP_THRESHOLD);
 
 /**
  * Test-only: reset both module-level limiters so cases don't bleed state
@@ -27,33 +31,12 @@ export function _resetSendLimitersForTests(): void {
 
 /**
  * Test-only: reset just the loop detector. Used by the rate-limiter wiring
- * test, which needs to drive 10+ same-key sends through the handler without
- * the loop detector tripping at message 5 (both limiters share the same
+ * test, which needs to drive same-key sends through the handler without
+ * the loop detector interfering (both limiters share the same
  * composite key). Not part of the public tool surface.
  */
 export function _resetLoopDetectorForTests(): void {
   loopDetector.reset();
-}
-
-/**
- * Recognize transient network/relayer failures that we should queue for retry
- * via the outbox. Mirrors the predicate used in `scripts/spike-sdk.ts`'s
- * `isRelayerUnreachable` — these are the substrings Node + fetch surface when
- * the relayer / RPC endpoint is unreachable. We deliberately do NOT match
- * generic "5" digit sequences (the plan's draft predicate did, which would
- * misclassify any error containing a 5 — e.g. a payload size of `length=5`).
- */
-function isInfraError(e: unknown): boolean {
-  if (!(e instanceof Error)) return false;
-  const stack = `${e.message}\n${e.stack ?? ''}`.toLowerCase();
-  return (
-    stack.includes('econnrefused') ||
-    stack.includes('fetch failed') ||
-    stack.includes('enotfound') ||
-    stack.includes('etimedout') ||
-    stack.includes('network is unreachable') ||
-    stack.includes('socket hang up')
-  );
 }
 
 /**
@@ -69,7 +52,7 @@ function isInfraError(e: unknown): boolean {
  *      type is `AttachmentFile`, not `{ uri }`.
  *
  * Instead we serialize `refs` (and `agent_id` / `parent_message_id` metadata)
- * into a JSON envelope and stuff it into `text`. `channel.history` parses the
+ * into a JSON envelope and stuff it into `text`. `channel_history` parses the
  * envelope back out, falling back to a plain-text representation when a
  * message wasn't sent by us. Once T11/T12 land we can migrate selectively.
  */
@@ -79,6 +62,9 @@ interface MessageEnvelope {
   agent_id: string | null;
   parent_message_id: string | null;
   refs: string[];
+  /** Addressee: a Sui address, `*` for everyone, or null (unaddressed). */
+  to: string | null;
+  intent: 'task' | 'result' | 'chat' | 'done' | null;
 }
 
 function tryParseEnvelope(s: string): MessageEnvelope | { type: 'text'; text: string } {
@@ -100,16 +86,38 @@ function tryParseEnvelope(s: string): MessageEnvelope | { type: 'text'; text: st
   }
 }
 
+/** Tool-facing shape of a decrypted message (shared by history, join and wait). */
+export function mapMessage(m: DecryptedMessage) {
+  const body = tryParseEnvelope(m.text);
+  const env = body as Partial<MessageEnvelope>;
+  return {
+    message_id: m.messageId,
+    sender: m.senderAddress,
+    timestamp_ms: m.createdAt,
+    verified: m.senderVerified,
+    order: m.order,
+    to: env.to ?? null,
+    intent: env.intent ?? null,
+    body,
+    refs: Array.isArray(env.refs) ? env.refs : [],
+  };
+}
+
 export function sendTool(
   sdk: SdkContext,
   outbox: Outbox,
 ): ToolDef<z.infer<typeof ChannelSendArgs>> {
   return {
-    name: 'channel.send',
-    description: 'Send a message to a channel; refs are Walrus URIs',
+    name: 'channel_send',
+    description:
+      'Send an encrypted, signed message to a channel (default: the active channel). ' +
+      "Set `to` (a member's Sui address, or '*') and `intent` so the other agent knows what is expected: " +
+      "'task' asks the addressee to do something, 'result' answers a task, 'chat' is discussion, 'done' ends the collaboration. " +
+      'For large content, store it with memory_write first and pass the returned URI in `refs`.',
     schema: ChannelSendArgs,
     handler: async (args) => {
-      const { channel_id, content, refs, agent_id, parent_message_id } = args;
+      const { content, refs, agent_id, parent_message_id, to, intent } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       // Rate-limit + loop-detect run BEFORE envelope construction and BEFORE
       // the SDK call. They throw plain-object errors that bypass the outbox
       // try/catch below — these are hard rejections, not transient infra
@@ -119,7 +127,10 @@ export function sendTool(
         throw { code: 'RATE_LIMITED', message: '>10 msgs/min on this channel' };
       }
       if (loopDetector.observe(limiterKey)) {
-        throw { code: 'LOOP_DETECTED', message: 'Same sender 5+ times in a row; pausing' };
+        throw {
+          code: 'LOOP_DETECTED',
+          message: `Same sender ${LOOP_THRESHOLD}+ times in a row; pausing`,
+        };
       }
       const body: MessageEnvelope = {
         type: 'text',
@@ -127,6 +138,8 @@ export function sendTool(
         agent_id: agent_id ?? null,
         parent_message_id: parent_message_id ?? null,
         refs: refs ?? [],
+        to: to ?? null,
+        intent: intent ?? null,
       };
       try {
         const result = await sdk.client.messaging.sendMessage({
@@ -143,10 +156,12 @@ export function sendTool(
       } catch (e: unknown) {
         if (isInfraError(e)) {
           const id = `out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          // Queue the full validated args so resend can replay them verbatim.
-          outbox.enqueue({ id, tool: 'channel.send', args });
+          // Queue the validated args (with the resolved channel) so resend
+          // replays them verbatim even if the active channel changes.
+          outbox.enqueue({ id, tool: 'channel_send', args: { ...args, channel_id } });
+          const walrus = (e as { code?: unknown }).code === 'WALRUS_UNAVAILABLE';
           throw {
-            code: 'RELAYER_UNREACHABLE',
+            code: walrus ? 'WALRUS_UNAVAILABLE' : 'RELAYER_UNREACHABLE',
             message: 'Queued to outbox',
             details: { outbox_id: id },
           };
@@ -159,10 +174,15 @@ export function sendTool(
 
 export function historyTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelHistoryArgs>> {
   return {
-    name: 'channel.history',
-    description: 'Get message history of a channel',
+    name: 'channel_history',
+    description:
+      'Read messages of a channel (default: the active channel), oldest first. ' +
+      'Pass `since` (an `order` from a previous result) to page forward. ' +
+      'To wait for new messages from other agents use channel_wait instead.',
     schema: ChannelHistoryArgs,
-    handler: async ({ channel_id, since, limit }) => {
+    handler: async (args) => {
+      const { since, limit } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       // The plan's schema names this `since`, but the SDK paginates by
       // `afterOrder` (a numeric cursor over per-group message ordering). They
       // both denote "messages strictly after this point," so we map directly.
@@ -174,25 +194,9 @@ export function historyTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelHist
         limit,
         ...(since !== undefined ? { afterOrder: since } : {}),
       });
-      const mapped = messages.map((m: DecryptedMessage) => {
-        const body = tryParseEnvelope(m.text);
-        const refs =
-          'refs' in body && Array.isArray((body as MessageEnvelope).refs)
-            ? (body as MessageEnvelope).refs
-            : [];
-        return {
-          message_id: m.messageId,
-          sender: m.senderAddress,
-          timestamp_ms: m.createdAt,
-          verified: m.senderVerified,
-          order: m.order,
-          body,
-          refs,
-        };
-      });
       return {
         channel_id,
-        messages: mapped,
+        messages: messages.map(mapMessage),
         has_next: hasNext,
       };
     },

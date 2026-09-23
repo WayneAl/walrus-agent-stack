@@ -24,6 +24,7 @@ describe('relayer offline -> outbox', () => {
     // Mock sdk whose sendMessage always fails with an infra-classified error.
     const sdk = {
       keypair: { toSuiAddress: () => '0xfake' },
+      config: { home: dir },
       client: {
         messaging: {
           sendMessage: async () => {
@@ -37,7 +38,7 @@ describe('relayer offline -> outbox', () => {
     dispatcher.register(sendTool(sdk, outbox));
 
     await expect(
-      dispatcher.invoke('channel.send', { channel_id: 'c', content: 'hi' }),
+      dispatcher.invoke('channel_send', { channel_id: 'c', content: 'hi' }),
     ).rejects.toMatchObject({ code: 'RELAYER_UNREACHABLE' });
 
     expect(outbox.pending()).toHaveLength(1);

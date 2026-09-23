@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import {
   sendTool,
@@ -8,6 +11,7 @@ import {
 } from '../../src/tools/channel-messaging.js';
 import type { SdkContext } from '../../src/sdk-client.js';
 import type { Outbox } from '../../src/outbox.js';
+import { setActiveChannel } from '../../src/session.js';
 
 beforeEach(() => {
   // Module-level rate limiter + loop detector keep state across tests;
@@ -40,7 +44,9 @@ function makeMockSdk(getMessagesResult?: unknown): {
   sdk: SdkContext;
   messaging: MockMessaging;
   address: string;
+  home: string;
 } {
+  const home = mkdtempSync(join(tmpdir(), 'wa-msg-'));
   const keypair = new Ed25519Keypair();
   const address = keypair.toSuiAddress();
   const messaging: MockMessaging = {
@@ -49,10 +55,10 @@ function makeMockSdk(getMessagesResult?: unknown): {
   };
   const sdk = {
     keypair,
-    config: { network: 'testnet' },
+    config: { network: 'testnet', home },
     client: { messaging },
   } as unknown as SdkContext;
-  return { sdk, messaging, address };
+  return { sdk, messaging, address, home };
 }
 
 describe('channel messaging tools', () => {
@@ -60,13 +66,13 @@ describe('channel messaging tools', () => {
     const { sdk } = makeMockSdk();
     const outbox = makeOutboxStub() as unknown as Outbox;
     const tools = [sendTool(sdk, outbox), historyTool(sdk)];
-    expect(tools.map((t) => t.name)).toEqual(['channel.send', 'channel.history']);
+    expect(tools.map((t) => t.name)).toEqual(['channel_send', 'channel_history']);
     for (const t of tools) {
       expect(t.description).toBeTruthy();
     }
   });
 
-  describe('channel.send', () => {
+  describe('channel_send', () => {
     let env: ReturnType<typeof makeMockSdk>;
     let outboxStub: MockOutbox;
     beforeEach(() => {
@@ -82,6 +88,8 @@ describe('channel messaging tools', () => {
         refs: ['walrus://blob/abc', 'walrus://blob/def'],
         agent_id: 'agent-7',
         parent_message_id: 'parent-uuid-9',
+        to: '0xb0b',
+        intent: 'task',
       })) as {
         message_id: string;
         channel_id: string;
@@ -104,6 +112,8 @@ describe('channel messaging tools', () => {
         agent_id: 'agent-7',
         parent_message_id: 'parent-uuid-9',
         refs: ['walrus://blob/abc', 'walrus://blob/def'],
+        to: '0xb0b',
+        intent: 'task',
       });
 
       expect(res.message_id).toBe('msg-id-123');
@@ -127,7 +137,25 @@ describe('channel messaging tools', () => {
         agent_id: null,
         parent_message_id: null,
         refs: [],
+        to: null,
+        intent: null,
       });
+    });
+
+    it('defaults channel_id to the active channel', async () => {
+      setActiveChannel(env.home, 'uuid-active');
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      const res = (await tool.handler({ content: 'hi' })) as { channel_id: string };
+      expect(res.channel_id).toBe('uuid-active');
+      expect(env.messaging.sendMessage.mock.calls[0]![0].groupRef).toEqual({ uuid: 'uuid-active' });
+    });
+
+    it('throws NO_ACTIVE_CHANNEL without channel_id or an active channel', async () => {
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      await expect(tool.handler({ content: 'hi' })).rejects.toMatchObject({
+        code: 'NO_ACTIVE_CHANNEL',
+      });
+      expect(env.messaging.sendMessage).not.toHaveBeenCalled();
     });
 
     it('throws RATE_LIMITED on the 11th send within the window and does not enqueue', async () => {
@@ -149,19 +177,26 @@ describe('channel messaging tools', () => {
       expect(outboxStub.enqueue).not.toHaveBeenCalled();
     });
 
-    it('throws LOOP_DETECTED on the 5th consecutive send from same sender on same channel', async () => {
-      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
-      // 5 consecutive observe() calls on the same key trip the detector at the
-      // 5th. The rate limiter (cap 10) does NOT fire first, so any throw here
-      // is the loop detector. Loop-detector throw must NOT enqueue to outbox.
-      for (let i = 0; i < 4; i++) {
-        await tool.handler({ channel_id: 'uuid-ld', content: `streak-${i}` });
-      }
-      await expect(
-        tool.handler({ channel_id: 'uuid-ld', content: 'streak-4' }),
-      ).rejects.toMatchObject({ code: 'LOOP_DETECTED' });
-      expect(env.messaging.sendMessage).toHaveBeenCalledTimes(4);
-      expect(outboxStub.enqueue).not.toHaveBeenCalled();
+    describe('loop detector', () => {
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('throws LOOP_DETECTED on the 20th consecutive send, not before', async () => {
+        // Space sends 7 s apart so the 10/min rate limiter never fires; any
+        // throw is then the loop detector. It must NOT enqueue to the outbox.
+        vi.useFakeTimers();
+        const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+        for (let i = 0; i < 19; i++) {
+          await tool.handler({ channel_id: 'uuid-ld', content: `streak-${i}` });
+          vi.advanceTimersByTime(7_000);
+        }
+        await expect(
+          tool.handler({ channel_id: 'uuid-ld', content: 'streak-19' }),
+        ).rejects.toMatchObject({ code: 'LOOP_DETECTED' });
+        expect(env.messaging.sendMessage).toHaveBeenCalledTimes(19);
+        expect(outboxStub.enqueue).not.toHaveBeenCalled();
+      });
     });
 
     it('queues to outbox and throws RELAYER_UNREACHABLE when sendMessage hits an infra error', async () => {
@@ -181,13 +216,38 @@ describe('channel messaging tools', () => {
       });
       expect(outboxStub.enqueue).toHaveBeenCalledTimes(1);
       const enqueued = outboxStub.enqueue.mock.calls[0]![0];
-      expect(enqueued.tool).toBe('channel.send');
+      expect(enqueued.tool).toBe('channel_send');
       expect(enqueued.args).toEqual(args);
       expect(typeof enqueued.id).toBe('string');
     });
+
+    it('queues and reports WALRUS_UNAVAILABLE for a transport Walrus failure', async () => {
+      env.messaging.sendMessage.mockImplementationOnce(async () => {
+        throw Object.assign(new Error('Walrus upload failed: 500'), {
+          status: 503,
+          code: 'WALRUS_UNAVAILABLE',
+        });
+      });
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      await expect(tool.handler({ channel_id: 'uuid-w', content: 'x' })).rejects.toMatchObject({
+        code: 'WALRUS_UNAVAILABLE',
+      });
+      expect(outboxStub.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not queue permission errors (403)', async () => {
+      env.messaging.sendMessage.mockImplementationOnce(async () => {
+        throw Object.assign(new Error('Not a sender'), { status: 403, code: 'NOT_GROUP_MEMBER' });
+      });
+      const tool = sendTool(env.sdk, outboxStub as unknown as Outbox);
+      await expect(tool.handler({ channel_id: 'uuid-p', content: 'x' })).rejects.toMatchObject({
+        status: 403,
+      });
+      expect(outboxStub.enqueue).not.toHaveBeenCalled();
+    });
   });
 
-  describe('channel.history', () => {
+  describe('channel_history', () => {
     it('passes limit and afterOrder when since is provided', async () => {
       const env = makeMockSdk({ messages: [], hasNext: false });
       const tool = historyTool(env.sdk);
@@ -220,6 +280,8 @@ describe('channel messaging tools', () => {
           agent_id: 'agent-A',
           parent_message_id: null,
           refs: ['walrus://blob/x'],
+          to: '0xb0b',
+          intent: 'result',
         }),
         senderAddress: '0xalice',
         createdAt: 1700000000000,
@@ -254,6 +316,8 @@ describe('channel messaging tools', () => {
           order: number;
           body: { type: 'text'; text: string; agent_id?: string | null; refs?: string[] };
           refs: string[];
+          to: string | null;
+          intent: string | null;
         }>;
         has_next: boolean;
       };
@@ -275,8 +339,12 @@ describe('channel messaging tools', () => {
         agent_id: 'agent-A',
         parent_message_id: null,
         refs: ['walrus://blob/x'],
+        to: '0xb0b',
+        intent: 'result',
       });
       expect(first.refs).toEqual(['walrus://blob/x']);
+      expect(first.to).toBe('0xb0b');
+      expect(first.intent).toBe('result');
 
       // Plain message falls back to a synthesized envelope; refs is empty.
       const second = res.messages[1]!;
@@ -285,6 +353,8 @@ describe('channel messaging tools', () => {
       expect(second.verified).toBe(false);
       expect(second.body).toEqual({ type: 'text', text: 'just a plain string' });
       expect(second.refs).toEqual([]);
+      expect(second.to).toBeNull();
+      expect(second.intent).toBeNull();
     });
   });
 });

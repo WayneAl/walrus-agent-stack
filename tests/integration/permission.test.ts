@@ -19,29 +19,29 @@ describe.skipIf(!hasIntegrationEnv())('permission revoke', () => {
   }, 60_000);
 
   it('kicked member cannot read new messages', async () => {
-    const c = (await alice.dispatcher.invoke('channel.create', {
+    const c = (await alice.dispatcher.invoke('channel_create', {
       name: 'kick-' + Date.now(),
       members: [bob.address],
     })) as { channel_id: string };
-    await alice.dispatcher.invoke('channel.send', {
+    await alice.dispatcher.invoke('channel_send', {
       channel_id: c.channel_id,
       content: 'before-kick',
     });
 
     // Bob can read it
-    const before = (await bob.dispatcher.invoke('channel.history', {
+    const before = (await bob.dispatcher.invoke('channel_history', {
       channel_id: c.channel_id,
     })) as { messages: Array<{ body: { text: string } }> };
     expect(before.messages.some((m) => m.body.text === 'before-kick')).toBe(true);
 
     // Alice kicks Bob
-    await alice.dispatcher.invoke('channel.kick', {
+    await alice.dispatcher.invoke('channel_kick', {
       channel_id: c.channel_id,
       address: bob.address,
     });
 
     // Alice sends new message
-    await alice.dispatcher.invoke('channel.send', {
+    await alice.dispatcher.invoke('channel_send', {
       channel_id: c.channel_id,
       content: 'after-kick',
     });
@@ -50,7 +50,7 @@ describe.skipIf(!hasIntegrationEnv())('permission revoke', () => {
     // Speculative error code shape — adjust after first real testnet run;
     // SDK doesn't document this path explicitly.
     await expect(
-      bob.dispatcher.invoke('channel.history', { channel_id: c.channel_id }),
+      bob.dispatcher.invoke('channel_history', { channel_id: c.channel_id }),
     ).rejects.toMatchObject({
       code: expect.stringMatching(/MEMBERSHIP_REVOKED|CHANNEL_ACCESS_DENIED/),
     });

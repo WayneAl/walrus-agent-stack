@@ -14,21 +14,21 @@ describe.skipIf(!hasIntegrationEnv())('memory integration', () => {
   beforeAll(async () => {
     env = newWalletEnv();
     await fundFromFaucet(env.address);
-    const created = (await env.dispatcher.invoke('channel.create', {
+    const created = (await env.dispatcher.invoke('channel_create', {
       name: 'mem-' + Date.now(),
     })) as { channel_id: string };
     cid = created.channel_id;
   }, 30_000);
 
   it('writes and reads memory', async () => {
-    const w = (await env.dispatcher.invoke('memory.write', {
+    const w = (await env.dispatcher.invoke('memory_write', {
       channel_id: cid,
       key: 'note.md',
       content: 'this is a note',
     })) as { uri: string };
     expect(w.uri).toMatch(/^walrus:\/\//);
 
-    const r = (await env.dispatcher.invoke('memory.read', { uri: w.uri })) as {
+    const r = (await env.dispatcher.invoke('memory_read', { uri: w.uri })) as {
       content: string;
       verified: boolean;
       author: string;

@@ -1,11 +1,18 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { z } from 'zod';
 
 export const ConfigSchema = z.object({
   privateKey: z.string().min(1),
   network: z.enum(['mainnet', 'testnet']).default('testnet'),
-  relayerUrl: z.string().url(),
+  // Absent → serverless transport (Sui `channel_log` + Walrus); set → HTTP relayer.
+  relayerUrl: z.string().url().optional(),
   sealServers: z.array(z.string()),
   rpcUrls: z.array(z.string().url()).min(1),
+  // $WAS_HOME: holds config.env, session.json, log/ and outbox/.
+  home: z.string(),
   logDir: z.string(),
   walrusPublisherUrl: z.string().url(),
   walrusAggregatorUrl: z.string().url(),
@@ -16,16 +23,6 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export type ConfigEnv = NodeJS.ProcessEnv;
 
-// NOTE: there is no public hosted sui-stack-messaging relayer at this time.
-// Operators must run their own relayer from
-// https://github.com/MystenLabs/sui-stack-messaging/tree/main/relayer
-// and set RELAYER_URL explicitly in their env. The constants below are
-// non-functional placeholders kept for back-compat; loadConfig surfaces a
-// validation error if the value is left at the placeholder URL.
-const DEFAULT_RELAYER_TESTNET = 'https://relayer.testnet.example.com';
-// PLACEHOLDER: see docs/MAINNET.md — provision a self-hosted or private
-// hosted relayer pointed at mainnet and set RELAYER_URL accordingly.
-const DEFAULT_RELAYER_MAINNET = 'https://relayer.mainnet.example.com';
 const DEFAULT_RPC_TESTNET = 'https://fullnode.testnet.sui.io:443';
 const DEFAULT_RPC_MAINNET = 'https://fullnode.mainnet.sui.io:443';
 
@@ -56,9 +53,8 @@ export const CHANNEL_LOG_TESTNET = {
 // are third-party operators verified by the Seal team. Choose 2+ of these
 // (any operators) for a quorum that survives one provider going down.
 //
-// loadConfig does NOT consume these — `SEAL_SERVERS` (comma-separated) env
-// is the single source of truth at runtime. The constants exist as
-// in-source documentation and to make future automation easier.
+// `SEAL_SERVERS` (comma-separated, env or config.env) is the runtime source of
+// truth; first-run bootstrap writes the two Mysten servers into config.env.
 export const KNOWN_SEAL_SERVERS_TESTNET = {
   'mysten-testnet-1':
     '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
@@ -97,24 +93,94 @@ export const SEAL_TESTNET_COMMITTEE_AGGREGATOR =
 // So we cannot hardcode a mainnet default. See docs/MAINNET.md.
 export const KNOWN_SEAL_SERVERS_MAINNET: readonly string[] = [];
 
-export function loadConfig(env: ConfigEnv = process.env): Config {
-  if (!env.SUI_PRIVATE_KEY) {
-    throw new Error('SUI_PRIVATE_KEY must be set in environment');
+export function wasHome(env: ConfigEnv = process.env): string {
+  return env.WAS_HOME ?? join(homedir(), '.walrus-agent-stack');
+}
+
+/** Parse `KEY=VALUE` lines; `#` comments, blank lines and surrounding quotes allowed. */
+export function parseEnvFile(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+    out[key] = value;
   }
-  const network = (env.SUI_NETWORK ?? 'testnet') as 'mainnet' | 'testnet';
-  return ConfigSchema.parse({
-    privateKey: env.SUI_PRIVATE_KEY,
+  return out;
+}
+
+export interface BootstrapResult {
+  config: Config;
+  configFile: string;
+  /** True when this call generated a new key and wrote config.env. */
+  created: boolean;
+}
+
+/**
+ * Load config from `$WAS_HOME/config.env` overlaid by `env` (env wins). With
+ * no `SUI_PRIVATE_KEY` anywhere, generate an Ed25519 testnet key and write it
+ * to config.env (0600, dir 0700) so first start needs no manual setup.
+ * `WAS_HOME` is read from `env` only — tests pass a tmp dir there.
+ */
+export function bootstrapConfig(env: ConfigEnv = process.env): BootstrapResult {
+  const home = wasHome(env);
+  const configFile = join(home, 'config.env');
+  const fromFile = existsSync(configFile) ? parseEnvFile(readFileSync(configFile, 'utf-8')) : {};
+  const merged: Record<string, string | undefined> = { ...fromFile };
+  for (const [k, v] of Object.entries(env)) if (v !== undefined) merged[k] = v;
+
+  let created = false;
+  if (!merged.SUI_PRIVATE_KEY) {
+    const generated = {
+      SUI_PRIVATE_KEY: Ed25519Keypair.generate().getSecretKey(),
+      SUI_NETWORK: 'testnet',
+      SEAL_SERVERS: [
+        KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-1'],
+        KNOWN_SEAL_SERVERS_TESTNET['mysten-testnet-2'],
+      ].join(','),
+    };
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    const lines = [
+      '# walrus-agent-stack config — generated on first start. Edit to override;',
+      '# process environment variables take precedence over this file.',
+      ...Object.entries({ ...fromFile, ...generated }).map(([k, v]) => `${k}=${v}`),
+      '',
+    ];
+    writeFileSync(configFile, lines.join('\n'), { mode: 0o600 });
+    chmodSync(configFile, 0o600); // mode is ignored when the file already existed
+    created = true;
+    // Env wins over the file, except that an unset key means env had no opinion.
+    for (const [k, v] of Object.entries(generated)) if (!env[k]) merged[k] = v;
+  }
+
+  const network = (merged.SUI_NETWORK ?? 'testnet') as 'mainnet' | 'testnet';
+  if (network === 'mainnet' && !merged.RELAYER_URL) {
+    throw new Error(
+      'SUI_NETWORK=mainnet needs RELAYER_URL: the serverless channel_log package is published on testnet only',
+    );
+  }
+  const config = ConfigSchema.parse({
+    privateKey: merged.SUI_PRIVATE_KEY,
     network,
-    relayerUrl: env.RELAYER_URL ?? (network === 'mainnet' ? DEFAULT_RELAYER_MAINNET : DEFAULT_RELAYER_TESTNET),
-    sealServers: (env.SEAL_SERVERS ?? '').split(',').filter(Boolean),
-    rpcUrls: (env.SUI_RPC_URLS ?? (network === 'mainnet' ? DEFAULT_RPC_MAINNET : DEFAULT_RPC_TESTNET)).split(','),
-    logDir: env.LOG_DIR ?? `${process.env.HOME}/.walrus-agent-stack/log`,
+    relayerUrl: merged.RELAYER_URL || undefined,
+    sealServers: (merged.SEAL_SERVERS ?? '').split(',').filter(Boolean),
+    rpcUrls: (merged.SUI_RPC_URLS ?? (network === 'mainnet' ? DEFAULT_RPC_MAINNET : DEFAULT_RPC_TESTNET)).split(','),
+    home,
+    logDir: merged.LOG_DIR ?? join(home, 'log'),
     walrusPublisherUrl:
-      env.WALRUS_PUBLISHER_URL ??
+      merged.WALRUS_PUBLISHER_URL ??
       (network === 'mainnet' ? DEFAULT_WALRUS_PUBLISHER_MAINNET : DEFAULT_WALRUS_PUBLISHER_TESTNET),
     walrusAggregatorUrl:
-      env.WALRUS_AGGREGATOR_URL ??
+      merged.WALRUS_AGGREGATOR_URL ??
       (network === 'mainnet' ? DEFAULT_WALRUS_AGGREGATOR_MAINNET : DEFAULT_WALRUS_AGGREGATOR_TESTNET),
-    walrusStorageEpochs: env.WALRUS_STORAGE_EPOCHS ? Number(env.WALRUS_STORAGE_EPOCHS) : 5,
+    walrusStorageEpochs: merged.WALRUS_STORAGE_EPOCHS ? Number(merged.WALRUS_STORAGE_EPOCHS) : 30,
   });
+  return { config, configFile, created };
+}
+
+export function loadConfig(env: ConfigEnv = process.env): Config {
+  return bootstrapConfig(env).config;
 }

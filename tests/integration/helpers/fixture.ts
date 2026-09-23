@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Dispatcher } from '../../../src/mcp/dispatch.js';
 import { loadConfig } from '../../../src/config.js';
-import { getSdk } from '../../../src/sdk-client.js';
+import { getSdk, resetSdk } from '../../../src/sdk-client.js';
 import { ToolLog } from '../../../src/logging.js';
 import { Outbox } from '../../../src/outbox.js';
 import { whoamiTool, verifyTool } from '../../../src/tools/identity.js';
@@ -16,12 +16,12 @@ import {
   leaveTool,
 } from '../../../src/tools/channel-lifecycle.js';
 import { sendTool, historyTool } from '../../../src/tools/channel-messaging.js';
-import { joinTool } from '../../../src/tools/channel-subscribe.js';
+import { joinTool, waitTool } from '../../../src/tools/channel-subscribe.js';
 import {
   writeTool as memoryWriteTool,
   readTool as memoryReadTool,
 } from '../../../src/tools/memory.js';
-import { debugTool, resendTool, healthTool } from '../../../src/tools/system.js';
+import { debugTool, resendTool, healthTool, setupTool } from '../../../src/tools/system.js';
 
 export interface TestEnv {
   dispatcher: Dispatcher;
@@ -39,8 +39,8 @@ export function hasIntegrationEnv(): boolean {
 }
 
 /**
- * Build a fully-wired test environment with a fresh Ed25519 wallet, all 15
- * MCP tools registered, and isolated log+outbox dirs under tmpdir.
+ * Build a fully-wired test environment with a fresh Ed25519 wallet, all 17
+ * MCP tools registered, and an isolated WAS_HOME (session, log, outbox) under tmpdir.
  *
  * Caller is responsible for funding the returned address (see faucet helper)
  * before invoking any on-chain tool.
@@ -51,9 +51,11 @@ export function newWalletEnv(): TestEnv {
   process.env.SUI_NETWORK = 'testnet';
   process.env.RELAYER_URL = process.env.TEST_RELAYER_URL!;
   process.env.SEAL_SERVERS = process.env.TEST_SEAL_SERVERS!;
-  process.env.LOG_DIR = mkdtempSync(join(tmpdir(), 'wa-test-'));
+  process.env.WAS_HOME = mkdtempSync(join(tmpdir(), 'wa-test-'));
+  process.env.LOG_DIR = join(process.env.WAS_HOME, 'log');
 
   const config = loadConfig();
+  resetSdk(); // each env gets its own wallet
   const sdk = getSdk(config);
   const log = new ToolLog(config.logDir);
   // Outbox lives in a sibling subdir under the test log dir so JSONL log
@@ -72,11 +74,13 @@ export function newWalletEnv(): TestEnv {
   dispatcher.register(sendTool(sdk, outbox));
   dispatcher.register(historyTool(sdk));
   dispatcher.register(joinTool(sdk));
+  dispatcher.register(waitTool(sdk));
   dispatcher.register(memoryWriteTool(sdk));
   dispatcher.register(memoryReadTool(sdk));
   dispatcher.register(debugTool(log));
   dispatcher.register(resendTool(outbox, dispatcher));
   dispatcher.register(healthTool(sdk));
+  dispatcher.register(setupTool(sdk));
 
   return { dispatcher, address: kp.toSuiAddress(), config };
 }

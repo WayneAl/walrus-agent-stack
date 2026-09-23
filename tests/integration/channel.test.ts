@@ -16,28 +16,28 @@ describe.skipIf(!hasIntegrationEnv())('channel integration', () => {
   }, 30_000);
 
   it('creates a channel and lists self as admin', async () => {
-    const created = (await env.dispatcher.invoke('channel.create', {
+    const created = (await env.dispatcher.invoke('channel_create', {
       name: 'test-' + Date.now(),
     })) as { channel_id: string };
     expect(created.channel_id).toBeDefined();
 
-    const members = (await env.dispatcher.invoke('channel.members', {
+    const members = (await env.dispatcher.invoke('channel_members', {
       channel_id: created.channel_id,
     })) as { admin: string };
     expect(members.admin).toBe(env.address);
   }, 30_000);
 
   it('sends 3 messages and reads them back in order', async () => {
-    const created = (await env.dispatcher.invoke('channel.create', {
+    const created = (await env.dispatcher.invoke('channel_create', {
       name: 'send-' + Date.now(),
     })) as { channel_id: string };
     const cid = created.channel_id;
 
     for (const text of ['a', 'b', 'c']) {
-      await env.dispatcher.invoke('channel.send', { channel_id: cid, content: text });
+      await env.dispatcher.invoke('channel_send', { channel_id: cid, content: text });
     }
 
-    const hist = (await env.dispatcher.invoke('channel.history', {
+    const hist = (await env.dispatcher.invoke('channel_history', {
       channel_id: cid,
     })) as { messages: Array<{ body: { text: string }; verified: boolean }> };
     expect(hist.messages.length).toBeGreaterThanOrEqual(3);

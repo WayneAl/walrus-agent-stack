@@ -25,19 +25,26 @@ function isToolError(e: unknown): e is ToolError {
   );
 }
 
+/** Hook that turns a non-ToolError thrown by a handler into a ToolError (null = keep default). */
+export type ErrorMapper = (e: unknown) => ToolError | null;
+
 export class Dispatcher {
   private tools = new Map<string, ToolDef<unknown>>();
 
-  constructor(private log?: ToolLog) {}
+  constructor(
+    private log?: ToolLog,
+    private mapError?: ErrorMapper,
+  ) {}
 
   register<T>(def: ToolDef<T>): void {
     this.tools.set(def.name, def as unknown as ToolDef<unknown>);
   }
 
-  list(): { name: string; description?: string }[] {
-    return Array.from(this.tools.values()).map(({ name, description }) => ({
+  list(): { name: string; description?: string; schema: ZodType<unknown> }[] {
+    return Array.from(this.tools.values()).map(({ name, description, schema }) => ({
       name,
       description,
+      schema,
     }));
   }
 
@@ -45,7 +52,9 @@ export class Dispatcher {
     const start = Date.now();
     let errorCode: string | null = null;
     try {
-      const tool = this.tools.get(name);
+      // Tools are named `channel_send`; the pre-rename dotted form
+      // (`channel.send`) still resolves, e.g. for queued outbox items.
+      const tool = this.tools.get(name.replaceAll('.', '_'));
       if (!tool) {
         errorCode = 'UNKNOWN_TOOL';
         const err: ToolError = {
@@ -70,6 +79,11 @@ export class Dispatcher {
         if (isToolError(e)) {
           errorCode = e.code;
           throw e;
+        }
+        const mapped = this.mapError?.(e);
+        if (mapped) {
+          errorCode = mapped.code;
+          throw mapped;
         }
         errorCode = 'INTERNAL_ERROR';
         const err: ToolError = {

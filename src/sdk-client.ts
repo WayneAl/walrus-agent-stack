@@ -4,8 +4,9 @@ import {
   WalrusHttpStorageAdapter,
 } from '@mysten/sui-stack-messaging';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import type { Config } from './config.js';
+import { CHANNEL_LOG_TESTNET, type Config } from './config.js';
 import { loadKeypair } from './wallet.js';
+import { SuiWalrusTransport } from './transport/sui-walrus-transport.js';
 
 // Lock TApproveContext to void via instantiation expression. Without this,
 // `ReturnType<typeof createSuiStackMessagingClient>` infers TApproveContext as
@@ -39,7 +40,22 @@ export function getSdk(config: Config): SdkContext {
     encryption: {
       sessionKey: { signer: keypair },
     },
-    relayer: { relayerUrl: config.relayerUrl },
+    // RELAYER_URL set → HTTP relayer; otherwise the serverless Sui + Walrus
+    // transport (loadConfig rejects mainnet without a relayer).
+    relayer: config.relayerUrl
+      ? { relayerUrl: config.relayerUrl }
+      : {
+          transport: new SuiWalrusTransport({
+            grpc,
+            packageId: CHANNEL_LOG_TESTNET.packageId,
+            registryId: CHANNEL_LOG_TESTNET.registryId,
+            walrus: {
+              publisherUrl: config.walrusPublisherUrl,
+              aggregatorUrl: config.walrusAggregatorUrl,
+              epochs: config.walrusStorageEpochs,
+            },
+          }),
+        },
     attachments: {
       storageAdapter: new WalrusHttpStorageAdapter({
         publisherUrl: config.walrusPublisherUrl,
@@ -50,4 +66,9 @@ export function getSdk(config: Config): SdkContext {
   });
   cached = { client, keypair, config };
   return cached;
+}
+
+/** Drop the cached context so the next `getSdk` rebuilds from a fresh config. */
+export function resetSdk(): void {
+  cached = null;
 }

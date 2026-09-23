@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -23,6 +24,27 @@ function asToolError(e: unknown): ToolError {
   };
 }
 
+type InputSchema = { type: 'object'; [k: string]: unknown };
+
+/** ListTools payload: each tool's zod schema as JSON Schema (input side, so defaulted fields stay optional). */
+export function listTools(dispatcher: Dispatcher): {
+  name: string;
+  description: string;
+  inputSchema: InputSchema;
+}[] {
+  return dispatcher.list().map((t) => {
+    const { $schema: _drop, ...json } = z.toJSONSchema(t.schema, { io: 'input' }) as Record<
+      string,
+      unknown
+    >;
+    return {
+      name: t.name,
+      description: t.description ?? '',
+      inputSchema: { ...json, type: 'object' as const },
+    };
+  });
+}
+
 export async function startServer(dispatcher: Dispatcher): Promise<void> {
   const server = new Server(
     { name: 'walrus-agent-stack-mcp', version: '0.1.0' },
@@ -30,11 +52,7 @@ export async function startServer(dispatcher: Dispatcher): Promise<void> {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: dispatcher.list().map((t) => ({
-      name: t.name,
-      description: t.description ?? '',
-      inputSchema: { type: 'object' as const },
-    })),
+    tools: listTools(dispatcher),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {

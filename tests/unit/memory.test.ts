@@ -46,13 +46,13 @@ describe('memory tools', () => {
   it('both tools expose correct names and non-empty descriptions', () => {
     const { sdk } = makeMockSdk();
     const tools = [writeTool(sdk), readTool(sdk)];
-    expect(tools.map((t) => t.name)).toEqual(['memory.write', 'memory.read']);
+    expect(tools.map((t) => t.name)).toEqual(['memory_write', 'memory_read']);
     for (const t of tools) {
       expect(t.description).toBeTruthy();
     }
   });
 
-  describe('memory.write', () => {
+  describe('memory_write', () => {
     let env: ReturnType<typeof makeMockSdk>;
     beforeEach(() => {
       env = makeMockSdk();
@@ -114,7 +114,7 @@ describe('memory tools', () => {
     });
   });
 
-  describe('memory.read', () => {
+  describe('memory_read', () => {
     it('parses URI, calls getMessage, decodes a real blob, returns verified payload', async () => {
       const env = makeMockSdk();
       // Build a real signed blob with the same keypair the SDK would use.

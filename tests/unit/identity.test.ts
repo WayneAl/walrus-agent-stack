@@ -98,8 +98,8 @@ describe('identity tools', () => {
     const { sdk } = makeSdk();
     const whoami = whoamiTool(sdk);
     const verify = verifyTool(sdk);
-    expect(whoami.name).toBe('identity.whoami');
-    expect(verify.name).toBe('identity.verify');
+    expect(whoami.name).toBe('identity_whoami');
+    expect(verify.name).toBe('identity_verify');
     expect(whoami.description).toBeTruthy();
     expect(verify.description).toBeTruthy();
   });

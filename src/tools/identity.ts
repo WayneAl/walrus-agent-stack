@@ -2,11 +2,13 @@ import { z } from 'zod';
 import type { ToolDef } from '../mcp/dispatch.js';
 import { EmptyArgs, IdentityVerifyArgs } from '../schemas.js';
 import type { SdkContext } from '../sdk-client.js';
+import { resolveChannelId } from '../session.js';
 
 export function whoamiTool(sdk: SdkContext): ToolDef<z.infer<typeof EmptyArgs>> {
   return {
-    name: 'identity.whoami',
-    description: "Return this MCP server's Sui address",
+    name: 'identity_whoami',
+    description:
+      "Return this agent's Sui address and network. Share the address with another agent's user so they can invite you to a channel.",
     schema: EmptyArgs,
     handler: async () => ({
       address: sdk.keypair.toSuiAddress(),
@@ -17,10 +19,13 @@ export function whoamiTool(sdk: SdkContext): ToolDef<z.infer<typeof EmptyArgs>> 
 
 export function verifyTool(sdk: SdkContext): ToolDef<z.infer<typeof IdentityVerifyArgs>> {
   return {
-    name: 'identity.verify',
-    description: "Verify a channel message's signature and return sender details",
+    name: 'identity_verify',
+    description:
+      "Verify a channel message's signature (default: the active channel) and return its sender address and timestamp.",
     schema: IdentityVerifyArgs,
-    handler: async ({ message_id, channel_id }) => {
+    handler: async (args) => {
+      const { message_id } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       // The SDK exposes a direct `getMessage` lookup keyed by groupRef +
       // messageId, which is far cheaper than scanning a history page. The
       // `senderVerified` flag on `DecryptedMessage` is the SDK's own

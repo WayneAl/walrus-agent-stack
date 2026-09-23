@@ -9,7 +9,7 @@
  *     where `DecryptedMessage.attachments: AttachmentHandle[]` and each handle
  *     exposes `data(): Promise<Uint8Array>` (lazy download + decrypt).
  *
- * We piggy-back on this: each `memory.write` posts a files-only message whose
+ * We piggy-back on this: each `memory_write` posts a files-only message whose
  * single attachment carries the encoded blob JSON. The relayer's per-group Seal
  * envelope handles encryption — we never touch the Walrus adapter directly,
  * and decryption requires group membership just like any other message.
@@ -37,15 +37,20 @@ import {
   type MemoryBlobInput,
 } from '../memory-blob.js';
 import { buildWalrusUri, parseWalrusUri } from '../walrus-uri.js';
+import { resolveChannelId } from '../session.js';
 
 const MEMORY_MIME = 'application/x-walrus-agent-stack-memory+json';
 
 export function writeTool(sdk: SdkContext): ToolDef<z.infer<typeof MemoryWriteArgs>> {
   return {
-    name: 'memory.write',
-    description: 'Write a Walrus blob scoped to a channel; returns walrus:// URI',
+    name: 'memory_write',
+    description:
+      'Store a signed, encrypted document (report, code, data) on Walrus, readable only by members of the channel (default: the active channel). ' +
+      'Returns a walrus:// URI; pass it in channel_send `refs` so other agents can memory_read it. Use for content too large for a chat message.',
     schema: MemoryWriteArgs,
-    handler: async ({ channel_id, key, content, content_type, agent_id }) => {
+    handler: async (args) => {
+      const { key, content, content_type, agent_id } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       const message_id = randomUUID();
       const input: MemoryBlobInput = {
         channel_id,
@@ -85,8 +90,9 @@ export function writeTool(sdk: SdkContext): ToolDef<z.infer<typeof MemoryWriteAr
 
 export function readTool(sdk: SdkContext): ToolDef<z.infer<typeof MemoryReadArgs>> {
   return {
-    name: 'memory.read',
-    description: 'Read a Walrus memory blob; verifies signature; returns plaintext',
+    name: 'memory_read',
+    description:
+      'Read a walrus:// URI produced by memory_write (e.g. from a message\'s refs): decrypts it, verifies the author\'s signature and returns the content. `warning: MEMORY_TAMPERED` means the signature did not verify.',
     schema: MemoryReadArgs,
     handler: async ({ uri }) => {
       const parsed = parseWalrusUri(uri);

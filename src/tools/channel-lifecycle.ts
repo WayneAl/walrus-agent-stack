@@ -13,6 +13,7 @@ import {
   ChannelLeaveArgs,
 } from '../schemas.js';
 import type { SdkContext } from '../sdk-client.js';
+import { resolveChannelId, setActiveChannel, setCursor } from '../session.js';
 
 /**
  * Returns the original (V1) package ID of the messaging Move package for the
@@ -26,28 +27,69 @@ function messagingOriginalPackageId(network: 'mainnet' | 'testnet'): string {
     : TESTNET_SUI_STACK_MESSAGING_PACKAGE_CONFIG.originalPackageId;
 }
 
+/** Add members with the full messaging permission set (send, read, edit, delete). */
+async function addFullMembers(sdk: SdkContext, groupId: string, addresses: string[]) {
+  const perms = defaultMemberPermissionTypes(messagingOriginalPackageId(sdk.config.network));
+  return sdk.client.groups.addMembers({
+    signer: sdk.keypair,
+    groupId,
+    members: addresses.map((address) => ({
+      address,
+      permissions: [
+        perms.MessagingSender,
+        perms.MessagingReader,
+        perms.MessagingEditor,
+        perms.MessagingDeleter,
+      ],
+    })),
+  });
+}
+
 export function createTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelCreateArgs>> {
   return {
-    name: 'channel.create',
-    description: 'Create a new encrypted channel; caller becomes admin',
+    name: 'channel_create',
+    description:
+      'Create a new end-to-end encrypted channel for collaborating with other agents; you become its admin. ' +
+      'Pass `members` (Sui addresses of the other agents) to invite them with full send/read permissions. ' +
+      'The new channel becomes your active channel, so later channel_* / memory_* calls can omit channel_id. ' +
+      'Share the returned channel_id with the other side so they can channel_join it.',
     schema: ChannelCreateArgs,
     handler: async ({ name, members = [] }) => {
       const uuid = globalThis.crypto.randomUUID();
+      // No `initialMembers`: the SDK grants those Reader only. Members are
+      // added below with the same full permission set channel_invite uses.
       const result = await sdk.client.messaging.createAndShareGroup({
         signer: sdk.keypair,
         name,
         uuid,
-        initialMembers: members,
       });
       // Deterministically derive the on-chain group object ID from the UUID we
       // supplied. The SDK does the same derivation internally and exposes it
       // via `client.messaging.derive.groupId`.
       const groupId = sdk.client.messaging.derive.groupId({ uuid });
+      setActiveChannel(sdk.config.home, uuid);
+      setCursor(sdk.config.home, uuid, null); // brand-new channel: everything is new
+      let inviteDigest: string | undefined;
+      if (members.length > 0) {
+        try {
+          inviteDigest = (await addFullMembers(sdk, groupId, members)).digest;
+        } catch (e: unknown) {
+          throw {
+            code: 'INVITE_FAILED',
+            message: `Channel ${uuid} was created but inviting members failed; retry with channel_invite: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+            details: { channel_id: uuid, members },
+          };
+        }
+      }
       return {
         channel_id: uuid,
         group_id: groupId,
         digest: result.digest,
         admin: sdk.keypair.toSuiAddress(),
+        invited: members,
+        ...(inviteDigest ? { invite_digest: inviteDigest } : {}),
       };
     },
   };
@@ -55,10 +97,12 @@ export function createTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelCreat
 
 export function membersTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelMembersArgs>> {
   return {
-    name: 'channel.members',
-    description: 'List members of a channel',
+    name: 'channel_members',
+    description:
+      'List the members of a channel (default: the active channel) with their permissions.',
     schema: ChannelMembersArgs,
-    handler: async ({ channel_id }) => {
+    handler: async (args) => {
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       const groupId = sdk.client.messaging.derive.groupId({ uuid: channel_id });
       // `client.groups.view.getMembers` returns `{ members: [{ address, permissions }], hasNextPage, cursor }`.
       // We use `exhaustive: true` to paginate transparently — caller gets the full set.
@@ -83,28 +127,15 @@ export function membersTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelMemb
 
 export function inviteTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelInviteArgs>> {
   return {
-    name: 'channel.invite',
-    description: 'Add a member to a channel with default messaging permissions',
+    name: 'channel_invite',
+    description:
+      "Add another agent (by Sui address) to a channel (default: the active channel) with full send/read permissions. Admin only. The invitee then calls channel_join with the channel_id.",
     schema: ChannelInviteArgs,
-    handler: async ({ channel_id, address }) => {
+    handler: async (args) => {
+      const { address } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       const groupId = sdk.client.messaging.derive.groupId({ uuid: channel_id });
-      const pkgId = messagingOriginalPackageId(sdk.config.network);
-      const perms = defaultMemberPermissionTypes(pkgId);
-      const result = await sdk.client.groups.addMembers({
-        signer: sdk.keypair,
-        groupId,
-        members: [
-          {
-            address,
-            permissions: [
-              perms.MessagingSender,
-              perms.MessagingReader,
-              perms.MessagingEditor,
-              perms.MessagingDeleter,
-            ],
-          },
-        ],
-      });
+      const result = await addFullMembers(sdk, groupId, [address]);
       return {
         channel_id,
         group_id: groupId,
@@ -117,10 +148,13 @@ export function inviteTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelInvit
 
 export function kickTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelKickArgs>> {
   return {
-    name: 'channel.kick',
-    description: 'Remove a member and rotate the channel encryption key',
+    name: 'channel_kick',
+    description:
+      'Remove a member from a channel (default: the active channel) and rotate the encryption key so they cannot read new messages. Admin only.',
     schema: ChannelKickArgs,
-    handler: async ({ channel_id, address }) => {
+    handler: async (args) => {
+      const { address } = args;
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       const result = await sdk.client.messaging.removeMembersAndRotateKey({
         signer: sdk.keypair,
         uuid: channel_id,
@@ -138,10 +172,12 @@ export function kickTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelKickArg
 
 export function leaveTool(sdk: SdkContext): ToolDef<z.infer<typeof ChannelLeaveArgs>> {
   return {
-    name: 'channel.leave',
-    description: 'Leave a channel; only the calling agent is removed',
+    name: 'channel_leave',
+    description:
+      'Leave a channel (default: the active channel); only this agent is removed.',
     schema: ChannelLeaveArgs,
-    handler: async ({ channel_id }) => {
+    handler: async (args) => {
+      const channel_id = resolveChannelId(sdk.config.home, args.channel_id);
       const groupId = sdk.client.messaging.derive.groupId({ uuid: channel_id });
       const result = await sdk.client.messaging.leave({
         signer: sdk.keypair,
